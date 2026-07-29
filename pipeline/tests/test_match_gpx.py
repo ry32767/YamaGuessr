@@ -87,17 +87,24 @@ def _setup_time_mode(tmp_path: Path, route: list, count: int = 300,
     return gpx, tel, tmp_path / "track.json"
 
 
-def test_auto_mode_falls_back_to_time_when_gps_is_frozen(tmp_path: Path,
-                                                         route: list) -> None:
+def test_auto_mode_refuses_time_matching(tmp_path: Path, route: list) -> None:
+    """GPXの時刻は計画のことがあるので、auto では時刻照合を選ばない。"""
     gpx, tel, out = _setup_time_mode(tmp_path, route)
-    meta = mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    with pytest.raises(mg.MatchError) as e:
+        mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    assert "--mode time" in str(e.value)
+
+
+def test_time_mode_can_be_requested_explicitly(tmp_path: Path, route: list) -> None:
+    gpx, tel, out = _setup_time_mode(tmp_path, route)
+    meta = mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     assert meta["mode_used"] == "time"
     assert meta["media"][0]["distinct_gps_fix_count"] == 1
 
 
 def test_time_mode_positions_follow_the_gpx_route(tmp_path: Path, route: list) -> None:
     gpx, tel, out = _setup_time_mode(tmp_path, route)
-    mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     data = json.loads(out.read_text(encoding="utf-8"))
     samples = data["samples"]
     assert len(samples) == 300
@@ -114,7 +121,7 @@ def test_timelapse_uses_real_time_not_video_time(tmp_path: Path, route: list) ->
     """1フレーム=実時間2秒のタイムラプスでも、実時刻でGPXを引く。"""
     gpx, tel, out = _setup_time_mode(tmp_path, route, count=300,
                                      interval_us=2_000_000)
-    mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     samples = json.loads(out.read_text(encoding="utf-8"))["samples"]
     # 実時間2秒/フレーム × 1m/s → 経路長はフレーム番号の2倍
     assert samples[100]["route_distance_m"] == pytest.approx(200.0, abs=4.0)
@@ -123,7 +130,7 @@ def test_timelapse_uses_real_time_not_video_time(tmp_path: Path, route: list) ->
 
 def test_time_offset_shifts_the_match(tmp_path: Path, route: list) -> None:
     gpx, tel, out = _setup_time_mode(tmp_path, route)
-    mg.run(str(gpx), [str(tel)], str(out), time_offset_s=60.0, quiet=True)
+    mg.run(str(gpx), [str(tel)], str(out), mode="time", time_offset_s=60.0, quiet=True)
     samples = json.loads(out.read_text(encoding="utf-8"))["samples"]
     assert samples[0]["route_distance_m"] == pytest.approx(60.0, abs=3.0)
 
@@ -131,7 +138,7 @@ def test_time_offset_shifts_the_match(tmp_path: Path, route: list) -> None:
 def test_samples_outside_gpx_time_range_are_suspect(tmp_path: Path, route: list) -> None:
     """GPXが終わったあとまで撮り続けた分は suspect になる。"""
     gpx, tel, out = _setup_time_mode(tmp_path, route, count=800)
-    meta = mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    meta = mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     samples = json.loads(out.read_text(encoding="utf-8"))["samples"]
     assert meta["suspect_count"] > 0
     assert samples[0]["suspect"] is False
@@ -150,7 +157,8 @@ def test_start_override_is_used(tmp_path: Path, route: list) -> None:
     gpx = write_gpx(tmp_path / "r.gpx", route, start=GPX_START_UTC)
     tel = write_telemetry(tmp_path / "nostart.json", 60, gps=FROZEN_GPS)
     out = tmp_path / "track.json"
-    mg.run(str(gpx), [str(tel)], str(out), starts=["2026-07-11T12:55:58"], quiet=True)
+    mg.run(str(gpx), [str(tel)], str(out), mode="time",
+           starts=["2026-07-11T12:55:58"], quiet=True)
     samples = json.loads(out.read_text(encoding="utf-8"))["samples"]
     # 開始が2分遅い → 120m 進んだ地点から始まる
     assert samples[0]["route_distance_m"] == pytest.approx(120.0, abs=3.0)
@@ -211,7 +219,7 @@ def test_multiple_media_are_merged_in_time_order(tmp_path: Path, route: list) ->
     write_summary(tmp_path / "clip_b_summary.json", "2026-07-11T12:57:58")
     out = tmp_path / "track.json"
 
-    meta = mg.run(str(gpx), [str(tel_b), str(tel_a)], str(out), quiet=True)
+    meta = mg.run(str(gpx), [str(tel_b), str(tel_a)], str(out), mode="time", quiet=True)
     assert meta["sample_count"] == 200
     assert {m["media_id"] for m in meta["media"]} == {"clip_a", "clip_b"}
 
@@ -250,7 +258,7 @@ def test_heading_convention_is_detected_and_applied(tmp_path: Path,
     write_summary(tmp_path / "telemetry_summary.json", VIDEO_START_LOCAL)
     out = tmp_path / "track.json"
 
-    meta = mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    meta = mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     heading = meta["heading"]
     assert heading["straight_sample_count"] > 0
     assert heading["candidates"][0]["agreement"] >= 0.8
@@ -268,7 +276,7 @@ def test_route_heading_is_always_available_as_fallback(tmp_path: Path,
                                                        route: list) -> None:
     """クォータニオンが無くても、進行方位はモード②の初期視点に使える。"""
     gpx, tel, out = _setup_time_mode(tmp_path, route)
-    meta = mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    meta = mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     assert meta["heading"]["chosen"] is None      # quat が無いので確定できない
     samples = json.loads(out.read_text(encoding="utf-8"))["samples"]
     assert all("heading_deg" not in s for s in samples)
@@ -288,7 +296,7 @@ def test_wrong_quaternion_convention_is_rejected(tmp_path: Path, route: list) ->
     write_summary(tmp_path / "telemetry_summary.json", VIDEO_START_LOCAL)
     out = tmp_path / "track.json"
 
-    meta = mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    meta = mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     assert meta["heading"]["candidates"][0]["agreement"] < 0.8
     assert meta["heading"]["chosen"] is None
     samples = json.loads(out.read_text(encoding="utf-8"))["samples"]
@@ -323,7 +331,8 @@ def test_cli_returns_error_code_on_failure(tmp_path: Path, route: list) -> None:
 
 def test_cli_writes_track_json(tmp_path: Path, route: list) -> None:
     gpx, tel, out = _setup_time_mode(tmp_path, route, count=50)
-    code = mg.main(["--gpx", str(gpx), "--telemetry", str(tel), "--out", str(out)])
+    code = mg.main(["--gpx", str(gpx), "--telemetry", str(tel), "--out", str(out),
+                    "--mode", "time"])
     assert code == 0
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["meta"]["mode_used"] == "time"
@@ -333,7 +342,7 @@ def test_cli_writes_track_json(tmp_path: Path, route: list) -> None:
 def test_snapped_answer_never_uses_raw_gps(tmp_path: Path, route: list) -> None:
     """AGENTS.md の禁止事項：生GPSをそのまま正解にしないこと。"""
     gpx, tel, out = _setup_time_mode(tmp_path, route, count=100)
-    mg.run(str(gpx), [str(tel)], str(out), quiet=True)
+    mg.run(str(gpx), [str(tel)], str(out), mode="time", quiet=True)
     gpx_track = load_gpx(gpx)
     for s in json.loads(out.read_text(encoding="utf-8"))["samples"]:
         assert haversine_m(LatLon(s["lat"], s["lon"]),

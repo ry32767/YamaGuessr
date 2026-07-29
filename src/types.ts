@@ -54,14 +54,11 @@ export interface QuizPoint {
   readonly elevation_m?: number;
   readonly type: PointType;
   /**
-   * public/ からの相対パス。**任意**。
-   * 無い地点は画像を持たず、モード②（3D地形）専用として出題する。
+   * public/ からの相対パス。**任意・複数可**。
+   * 空／無しの地点は画像を持たず、モード②（3D地形）専用として出題する。
+   * どの画像を使うかはレビューで人が選ぶ（撮影時刻からの自動割り当てはしない）。
    */
-  readonly image_path?: string;
-  /** 画像の出所メディア（分割動画・後から足した素材の識別） */
-  readonly media_id?: string;
-  /** 動画先頭からの切り出し秒。画像が無い地点では無し */
-  readonly frame_time_s?: number;
+  readonly image_paths?: readonly string[];
   /** カメラ方位（真北基準・時計回り）。算出不能な場合は無し */
   readonly heading_deg?: number;
   /** GPXルートの進行方位。heading_deg が無いときの初期視点に使う */
@@ -72,8 +69,8 @@ export interface QuizPoint {
 /** その地点がモード①（画像＋地形図）で出題できるか */
 export function hasImage(
   point: QuizPoint,
-): point is QuizPoint & { image_path: string } {
-  return typeof point.image_path === 'string' && point.image_path.length > 0;
+): point is QuizPoint & { image_paths: readonly string[] } {
+  return Array.isArray(point.image_paths) && point.image_paths.length > 0;
 }
 
 /** quiz_points.json 全体 */

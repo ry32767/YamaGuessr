@@ -4,17 +4,23 @@
 
 ```mermaid
 flowchart TD
-    A[DJI動画 .MP4] -->|1 extract_telemetry.py| B[telemetry.json]
-    G[登山ルート .gpx] -->|2 match_gpx.py| C[track.json スナップ済み+heading]
-    B --> C
-    C -->|3 detect_candidates.py| D[candidates.json 品質指標付き]
-    D -->|4 review.html 採用/却下/時刻調整/手動追加| E[confirmed_points.json]
-    A -->|5 extract_frames.py| F[WebP画像群]
-    E --> F
-    E --> H[6 build_quiz_data.py]
+    G[登山ルート .gpx] -->|1 detect_candidates.py| C[candidates.json 出題候補]
+    A[動画 .MP4] -->|2 build_library.py 一定間隔で切り出し| L[画像ライブラリ]
+    P[写真 .jpg] --> L
+    C -->|3 review.html| R[地点を選び、画像を割り当てる]
+    L --> R
+    R --> E[confirmed_points.json]
+    E -->|4 extract_frames.py final| F[WebP画像群]
+    A --> F
+    P --> F
+    E --> H[5 build_quiz_data.py]
     F --> H
-    H --> I[public/data/quiz_points.json + public/images/]
+    G --> H
+    H --> I[public/data/quiz_points.json + tracks/ + images/]
 ```
+
+> **GPXの時刻は使わない。** 計画のGPXだと実際に歩いた時刻と無関係になりうるため、
+> 撮影時刻から位置を割り出す方式は既定で使わない。**地点はGPXの形から、画像は人が選ぶ。**
 
 ## 1. `extract_telemetry.py`
 DJI動画のdjmdトラック（`handler="CAM meta"`, protobuf）からフレーム毎のテレメトリを抽出し、CSV／JSON／サマリJSONを出力する。ffmpeg等の外部ツールに依存しない純Python実装。

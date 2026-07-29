@@ -277,12 +277,47 @@
   }
 }
 
+.quiz__photobox {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .quiz__photo {
   flex: 1;
   min-height: 0;
   width: 100%;
   object-fit: contain;
   background: #0a0e14;
+}
+
+/* 1地点に複数枚あるときの切り替え */
+.quiz__thumbs {
+  display: flex;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  overflow-x: auto;
+  background: var(--c-ridge);
+  border-top: var(--border);
+  flex-shrink: 0;
+}
+
+.quiz__thumb {
+  width: 56px;
+  height: var(--tap);
+  flex-shrink: 0;
+  padding: 0;
+  border: 2px solid var(--c-mist);
+  border-radius: var(--r-sm);
+  background-color: #0a0e14;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+}
+
+.quiz__thumb[aria-selected='true'] {
+  border-color: var(--c-alt);
 }
 
 .quiz__terrain {
@@ -351,6 +386,30 @@
 
 .terrain-btn:hover {
   background: var(--c-mist);
+}
+
+/* 選択中は色だけでなく枠と太字でも示す */
+.terrain-btn[aria-pressed='true'] {
+  background: var(--c-alt);
+  border-color: var(--c-alt);
+  color: var(--c-ridge);
+  font-weight: 700;
+}
+
+.terrain-legend {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+  z-index: 3;
+  margin: 0;
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-full);
+  background: rgba(16, 22, 31, 0.78);
+  border: var(--border);
+  color: var(--c-slate);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .quiz__answer {

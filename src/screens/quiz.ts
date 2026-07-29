@@ -4,7 +4,7 @@
  * 地図が主役。UIは上下の薄い帯と、地図の上に浮く「回答する」ボタン1つだけ。
  */
 import {
-  imageUrl,
+  imageUrls,
   initialHeading,
   loadTrack,
   mountainOf,
@@ -12,7 +12,7 @@ import {
   type MapView,
 } from '../data';
 import { AnswerMap } from '../map/answerMap';
-import { Terrain3D } from '../map/terrain3d';
+import { PRESETS, Terrain3D, type ViewPreset } from '../map/terrain3d';
 import { formatRadius, visibleRadii } from '../map/rings';
 import { CORRECT_THRESHOLD, play, playForScore } from '../sound';
 import type { Answer, QuizSession } from '../session';
@@ -64,25 +64,58 @@ export function createQuizScreen(
   if (session.viewMode === 'terrain3d') {
     terrainHost = el('div', { class: 'quiz__terrain' });
     append(media, terrainHost);
+    const presetButtons = new Map<ViewPreset, HTMLButtonElement>();
+    const syncPresetButtons = (active: ViewPreset): void => {
+      for (const [key, button] of presetButtons) {
+        button.setAttribute('aria-pressed', String(key === active));
+      }
+    };
+
     terrain = new Terrain3D(terrainHost, {
       center: { lat: first.lat, lon: first.lon },
       headingDeg: initialHeading(first),
       groundElevationM: first.elevation_m,
+      onPresetChange: syncPresetButtons,
     });
 
-    // 「自分がどこに立っているか」を一発で確かめられるようにする
+    // 視点モードの切り替えと、「自分がどこに立っているか」の確認
     const view = terrain;
-    const down = el('button', { class: 'terrain-btn', type: 'button' }, '真下を見る');
-    const ahead = el('button', { class: 'terrain-btn', type: 'button' }, '水平に戻す');
-    down.addEventListener('click', () => view.lookDown());
-    ahead.addEventListener('click', () => view.lookAhead());
-    append(terrainHost, el('div', { class: 'terrain-controls' }, down, ahead));
+    const controls = el('div', { class: 'terrain-controls', role: 'group', 'aria-label': '視点' });
+    for (const key of ['first_person', 'overhead'] as ViewPreset[]) {
+      const preset = PRESETS[key];
+      const button = el(
+        'button',
+        {
+          class: 'terrain-btn',
+          type: 'button',
+          'aria-pressed': String(key === view.currentPreset()),
+          title: preset.hint,
+        },
+        preset.label,
+      ) as HTMLButtonElement;
+      button.addEventListener('click', () => view.setPreset(key));
+      presetButtons.set(key, button);
+      append(controls, button);
+    }
+    const down = el('button', { class: 'terrain-btn', type: 'button' }, '真下');
+    down.addEventListener('click', () => {
+      view.lookDown();
+      syncPresetButtons(view.currentPreset());
+    });
+    append(controls, down);
+    append(terrainHost, controls);
+    append(
+      terrainHost,
+      el('p', { class: 'terrain-legend' }, Terrain3D.routeLegend()),
+    );
   }
 
   const photo = el('img', {
     class: 'quiz__photo',
-    alt: 'この地点から撮影した1コマ。ここがどこかを地形図で当てます。',
+    alt: 'この地点で撮影した1枚。ここがどこかを地形図で当てます。',
   }) as HTMLImageElement;
+  const thumbs = el('div', { class: 'quiz__thumbs', role: 'tablist', 'aria-label': '画像' });
+  const photoBox = el('div', { class: 'quiz__photobox' }, photo, thumbs);
 
   const hint = el(
     'div',
@@ -99,7 +132,7 @@ export function createQuizScreen(
   let resultPanel: HTMLElement | null = null;
   let shownTrackId: string | null = null;
 
-  /** 山が変わったときだけトラックを読み直して地形図に重ねる。 */
+  /** 山が変わったときだけトラックを読み直し、地形図と3Dの両方に渡す。 */
   async function syncTrack(point: QuizPoint): Promise<void> {
     if (shownTrackId === point.mountain_id) return;
     shownTrackId = point.mountain_id;
@@ -107,6 +140,7 @@ export function createQuizScreen(
     // 読み込み中に次の問題へ進んで山が変わっていたら捨てる
     if (shownTrackId !== point.mountain_id) return;
     answerMap.showTrack(track);
+    terrain?.setTrack(track);
   }
 
   /**
@@ -117,16 +151,17 @@ export function createQuizScreen(
     return mountainView(session.data, point.mountain_id);
   }
 
+  /**
+   * その地点の画像を出す。1地点に複数枚あることがあるので、
+   * 2枚以上なら下にサムネイルを並べて切り替えられるようにする。
+   */
   function renderMedia(point: QuizPoint): void {
-    const url = imageUrl(point);
-    // 画像ノードは使い回す（3Dビューの下に写真が入る構成）
-    if (url) {
-      photo.src = url;
-      photo.loading = 'eager';
-      if (!photo.isConnected) media.insertBefore(photo, media.firstChild);
-    } else {
-      photo.remove();
-      if (session.viewMode === 'terrain3d' && !media.querySelector('.media-note')) {
+    const urls = imageUrls(point);
+    media.querySelector('.media-note')?.remove();
+
+    if (urls.length === 0) {
+      photoBox.remove();
+      if (session.viewMode === 'terrain3d') {
         media.insertBefore(
           el(
             'p',
@@ -136,7 +171,35 @@ export function createQuizScreen(
           media.firstChild,
         );
       }
+      return;
     }
+
+    const show = (index: number): void => {
+      photo.src = urls[index] ?? '';
+      photo.loading = 'eager';
+      for (const [i, node] of [...thumbs.children].entries()) {
+        node.setAttribute('aria-selected', String(i === index));
+      }
+    };
+
+    clear(thumbs);
+    if (urls.length > 1) {
+      urls.forEach((url, i) => {
+        const thumb = el('button', {
+          class: 'quiz__thumb',
+          type: 'button',
+          role: 'tab',
+          'aria-selected': String(i === 0),
+          'aria-label': `${i + 1}枚目を見る（全${urls.length}枚）`,
+        });
+        thumb.style.backgroundImage = `url("${url}")`;
+        thumb.addEventListener('click', () => show(i));
+        append(thumbs, thumb);
+      });
+    }
+    thumbs.hidden = urls.length <= 1;
+    if (!photoBox.isConnected) media.insertBefore(photoBox, media.firstChild);
+    show(0);
   }
 
   function renderQuestion(): void {

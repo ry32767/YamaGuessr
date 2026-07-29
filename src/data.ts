@@ -61,9 +61,10 @@ export async function loadTrack(mountain: Mountain): Promise<TrackFeature | null
   }
 }
 
-/** 画像パスを配信URLに変換する。 */
-export function imageUrl(point: QuizPoint): string | null {
-  return hasImage(point) ? `${import.meta.env.BASE_URL}${point.image_path}` : null;
+/** その地点の画像URLを配信URLに直して返す（0枚なら空配列）。 */
+export function imageUrls(point: QuizPoint): string[] {
+  if (!hasImage(point)) return [];
+  return point.image_paths.map((path) => `${import.meta.env.BASE_URL}${path}`);
 }
 
 /**

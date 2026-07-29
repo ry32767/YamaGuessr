@@ -155,8 +155,9 @@ def test_build_final_frames_names_files_by_point_id(video: Path,
                                                     tmp_path: Path) -> None:
     """ファイル名に緯度経度を含めない（AGENTS.md の禁止事項）。"""
     confirmed = {"points": [
-        {"id": "odaigahara-2026-06-11-001", "media_id": "clip",
-         "frame_time_s": 8.0, "lat": 34.18519, "lon": 136.10931},
+        {"id": "odaigahara-2026-06-11-001", "lat": 34.18519, "lon": 136.10931,
+         "images": [{"id": "clip-1", "kind": "video_frame",
+                     "media_id": "clip", "time_s": 8.0}]},
         {"id": "odaigahara-2026-06-11-002", "lat": 34.17, "lon": 136.09},  # 3D専用
     ]}
     cpath = tmp_path / "confirmed.json"
@@ -166,11 +167,57 @@ def test_build_final_frames_names_files_by_point_id(video: Path,
     meta = ef.build_final_frames(str(cpath), {"clip": str(video)}, str(out_dir),
                                  quiet=True)
     assert meta["images_written"] == 1
-    assert meta["frameless"] == 1
+    assert meta["imageless"] == 1
     files = sorted(p.name for p in out_dir.iterdir())
-    assert files == ["odaigahara-2026-06-11-001.webp"]
+    assert files == ["odaigahara-2026-06-11-001-1.webp"]
     assert all("34.1" not in f and "136.1" not in f for f in files)
     assert meta["max_written_bytes"] <= ef.FINAL_MAX_BYTES
+
+
+def test_build_final_frames_handles_multiple_images_and_photos(
+        video: Path, tmp_path: Path) -> None:
+    """1地点に動画フレームと写真を混ぜて割り当てられる。"""
+    photo = tmp_path / "IMG_0001.jpg"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=800x600:rate=1:duration=1", "-frames:v", "1", str(photo)],
+        capture_output=True, check=True)
+    confirmed = {"points": [{
+        "id": "p-001", "lat": 34.18, "lon": 136.1,
+        "images": [
+            {"id": "clip-1", "kind": "video_frame", "media_id": "clip", "time_s": 5.0},
+            {"id": "photo-1", "kind": "photo", "source": "IMG_0001.jpg",
+             "source_path": str(photo)},
+        ],
+    }]}
+    cpath = tmp_path / "confirmed.json"
+    cpath.write_text(json.dumps(confirmed), encoding="utf-8")
+    out_dir = tmp_path / "images"
+
+    meta = ef.build_final_frames(str(cpath), {"clip": str(video)}, str(out_dir),
+                                 quiet=True)
+    assert meta["images_written"] == 2
+    assert meta["failed"] == []
+    assert sorted(p.name for p in out_dir.iterdir()) == ["p-001-1.webp", "p-001-2.webp"]
+
+
+def test_missing_photo_source_is_reported_not_fatal(video: Path,
+                                                    tmp_path: Path) -> None:
+    confirmed = {"points": [{
+        "id": "p-001", "lat": 34.18, "lon": 136.1,
+        "images": [
+            {"id": "clip-1", "kind": "video_frame", "media_id": "clip", "time_s": 5.0},
+            {"id": "photo-1", "kind": "photo", "source": "missing.jpg",
+             "source_path": str(tmp_path / "missing.jpg")},
+        ],
+    }]}
+    cpath = tmp_path / "confirmed.json"
+    cpath.write_text(json.dumps(confirmed), encoding="utf-8")
+    meta = ef.build_final_frames(str(cpath), {"clip": str(video)},
+                                 str(tmp_path / "images"), quiet=True)
+    assert meta["images_written"] == 1
+    assert len(meta["failed"]) == 1
+    assert "missing.jpg" in meta["failed"][0]
 
 
 def test_cli_final_and_previews(video: Path, tmp_path: Path) -> None:
@@ -183,13 +230,15 @@ def test_cli_final_and_previews(video: Path, tmp_path: Path) -> None:
                     "--out-dir", str(tmp_path / "pv")]) == 0
 
     confirmed = tmp_path / "confirmed.json"
-    confirmed.write_text(json.dumps(
-        {"points": [{"id": "p1", "media_id": "clip", "frame_time_s": 10.0}]}),
-        encoding="utf-8")
+    confirmed.write_text(json.dumps({"points": [{
+        "id": "p1",
+        "images": [{"id": "clip-1", "kind": "video_frame",
+                    "media_id": "clip", "time_s": 10.0}],
+    }]}), encoding="utf-8")
     assert ef.main(["final", "--confirmed", str(confirmed),
                     "--video", f"clip={video}",
                     "--out-dir", str(tmp_path / "img")]) == 0
-    assert (tmp_path / "img" / "p1.webp").exists()
+    assert (tmp_path / "img" / "p1-1.webp").exists()
 
 
 def test_cli_reports_error_for_missing_input(tmp_path: Path) -> None:

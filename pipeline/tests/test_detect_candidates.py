@@ -207,7 +207,7 @@ def test_gpx_only_mode_marks_candidates_as_frameless(
 
 def test_track_mode_carries_frame_time_and_media_id(
         tmp_path: Path, two_peak_cache: Path) -> None:
-    """動画と照合済みなら、候補に切り出し時刻と media_id が付く。"""
+    """カメラGPSが生きている動画では、候補に切り出し時刻と media_id が付く。"""
     route = build_route(BASE_LAT, BASE_LON, legs=((0.0, 1330.0),), step_m=10.0)
     gpx = write_gpx(tmp_path / "r.gpx", route,
                     start=datetime(2026, 6, 10, 23, 0, tzinfo=timezone.utc),
@@ -215,7 +215,7 @@ def test_track_mode_carries_frame_time_and_media_id(
     tel = write_telemetry(tmp_path / "clip.json", 1300, gps=(BASE_LAT, BASE_LON))
     write_summary(tmp_path / "clip_summary.json", "2026-06-11T08:00:00")
     track = tmp_path / "track.json"
-    mg.run(str(gpx), [str(tel)], str(track), quiet=True)
+    mg.run(str(gpx), [str(tel)], str(track), mode="time", quiet=True)
 
     out = tmp_path / "candidates.json"
     dc.run(track=str(track), out_path=str(out), dem_offline=True,
@@ -240,7 +240,7 @@ def test_suspect_samples_are_excluded(tmp_path: Path, two_peak_cache: Path) -> N
     tel = write_telemetry(tmp_path / "clip.json", 1500, gps=(BASE_LAT, BASE_LON))
     write_summary(tmp_path / "clip_summary.json", "2026-06-11T08:00:00")
     track = tmp_path / "track.json"
-    meta = mg.run(str(gpx), [str(tel)], str(track), quiet=True)
+    meta = mg.run(str(gpx), [str(tel)], str(track), mode="time", quiet=True)
     assert meta["suspect_count"] > 0
 
     out = tmp_path / "candidates.json"

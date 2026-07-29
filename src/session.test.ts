@@ -19,7 +19,7 @@ function point(i: number, withImage = true): QuizPoint {
     type: 'peak',
     source: 'auto',
   };
-  return withImage ? { ...base, image_path: `images/x/${i}.webp`, frame_time_s: i } : base;
+  return withImage ? { ...base, image_paths: [`images/x/${i}-1.webp`] } : base;
 }
 
 function makeData(count: number, imagesFor: (i: number) => boolean = () => true): QuizData {
@@ -67,7 +67,7 @@ describe('出題対象の絞り込み（3D専用地点）', () => {
     const session = QuizSession.completeAll(data, 'map2d');
     expect(session.total).toBe(5);
     for (let i = 0; i < session.total; i += 1) {
-      expect(session.pointAt(i)!.image_path).toBeTruthy();
+      expect(session.pointAt(i)!.image_paths?.length).toBeGreaterThan(0);
     }
   });
 

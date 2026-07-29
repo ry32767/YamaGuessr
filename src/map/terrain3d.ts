@@ -11,6 +11,8 @@
  */
 import maplibregl, { Map as MapLibreMap } from 'maplibre-gl';
 import type { LatLng } from '../scoring';
+import type { TrackFeature } from '../types';
+import { LOCAL_ROUTE_RADIUS_M, localRouteSegment } from './route';
 import {
   GSI_ATTRIBUTION,
   TERRAIN_EXAGGERATION,
@@ -19,18 +21,54 @@ import {
   terrainStyle,
 } from './style';
 
+/** 視点モード */
+export type ViewPreset = 'first_person' | 'overhead';
+
+interface Preset {
+  label: string;
+  pitch: number;
+  zoom: number;
+  hint: string;
+}
+
+/**
+ * 視点モードの設定。どちらも中心は出題地点のままなので、
+ * 切り替えても立ち位置は変わらない。
+ */
+export const PRESETS: Record<ViewPreset, Preset> = {
+  first_person: {
+    label: '一人称',
+    // 立っているように見せるには、地点のすぐそばまでカメラを寄せる必要がある
+    pitch: 84,
+    zoom: 17.4,
+    hint: 'その場に立って見回している視点',
+  },
+  overhead: {
+    label: '俯瞰',
+    pitch: 52,
+    zoom: 14.2,
+    hint: '斜め上から地形の広がりを見る',
+  },
+};
+
+const SOURCE_ROUTE = 'yg-local-route';
+const LAYER_ROUTE_HALO = 'yg-local-route-halo';
+const LAYER_ROUTE = 'yg-local-route-line';
+
 /**
  * 俯角 [deg]。MapLibre の pitch と同じ定義で、
  * 0 = 真下を見下ろす（自分の地点が画面中央）、85 = ほぼ水平。
  */
 const MIN_PITCH = 0;
 const MAX_PITCH = 85;
-/** 起動時の向き。ほぼ水平＝立って景色を見ている状態 */
-const DEFAULT_PITCH = 82;
-/** 寄り引きの範囲。地点からどれくらい離れて見るか */
+/**
+ * 寄り引きの範囲。地点からどれくらい離れて見るか。
+ *
+ * MapLibre のカメラは「中心（＝出題地点）からズームで決まる距離」に置かれる。
+ * 一人称らしくするには相当寄せる必要があるので、上限を大きめに取っている。
+ */
 const MIN_ZOOM = 13;
-const MAX_ZOOM = 17.5;
-const DEFAULT_ZOOM = 15.2;
+const MAX_ZOOM = 19;
 /** ドラッグ量に対する回転の感度 */
 const YAW_PER_PX = 0.25;
 const PITCH_PER_PX = 0.2;
@@ -45,6 +83,10 @@ export interface Terrain3DOptions {
   headingDeg: number;
   /** 立っている地面の標高 [m]。表示にのみ使う */
   groundElevationM?: number | undefined;
+  /** 足元のルートを描くためのトラック。無ければ描かない */
+  track?: TrackFeature | null;
+  /** 視点モードが変わったときに呼ばれる（UIの選択状態を合わせるため） */
+  onPresetChange?: ((preset: ViewPreset) => void) | undefined;
 }
 
 /** 方位を「北」「北東」…の日本語表記にする。数字だけに頼らないため。 */
@@ -66,27 +108,32 @@ export class Terrain3D {
   readonly map: MapLibreMap;
   private center: LatLng;
   private bearing: number;
-  private pitch = DEFAULT_PITCH;
-  private zoom = DEFAULT_ZOOM;
+  private preset: ViewPreset = 'first_person';
+  private pitch = PRESETS.first_person.pitch;
+  private zoom = PRESETS.first_person.zoom;
   private groundElevation = 0;
+  private track: TrackFeature | null;
   private ready = false;
   private dragPointerId: number | null = null;
   private lastX = 0;
   private lastY = 0;
   private readonly hud: HTMLElement;
+  private readonly onPresetChange: ((preset: ViewPreset) => void) | undefined;
 
   constructor(container: HTMLElement, options: Terrain3DOptions) {
     registerGsiDemProtocol();
     this.center = options.center;
     this.bearing = options.headingDeg;
     this.groundElevation = options.groundElevationM ?? 0;
+    this.track = options.track ?? null;
+    this.onPresetChange = options.onPresetChange;
 
     this.map = new MapLibreMap({
       container,
       style: terrainStyle(),
       center: [options.center.lon, options.center.lat],
-      zoom: DEFAULT_ZOOM,
-      pitch: DEFAULT_PITCH,
+      zoom: this.zoom,
+      pitch: this.pitch,
       bearing: options.headingDeg,
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
@@ -140,6 +187,7 @@ export class Terrain3D {
       this.map.setTerrain({ source: TERRAIN_SOURCE, exaggeration: TERRAIN_EXAGGERATION });
       this.ready = true;
       this.addHereMarker();
+      this.renderLocalRoute();
       this.apply();
     });
     this.renderHud();
@@ -213,10 +261,18 @@ export class Terrain3D {
     this.apply();
   }
 
-  /** 水平に戻す。 */
-  lookAhead(): void {
-    this.pitch = DEFAULT_PITCH;
+  /** 視点モードを切り替える。中心は動かないので立ち位置は変わらない。 */
+  setPreset(preset: ViewPreset): void {
+    this.preset = preset;
+    const config = PRESETS[preset];
+    this.pitch = config.pitch;
+    this.zoom = config.zoom;
     this.apply();
+    this.onPresetChange?.(preset);
+  }
+
+  currentPreset(): ViewPreset {
+    return this.preset;
   }
 
   // -------------------------------------------------------------------------
@@ -263,6 +319,56 @@ export class Terrain3D {
     });
   }
 
+  /**
+   * 足元のルートだけを描く。
+   *
+   * **ルート全体を描かない。** 3Dに全体を出すと、地形図を見なくても
+   * どこを歩いているかが分かってしまう。進む向きが読める最小限（前後10m）に絞る。
+   */
+  private renderLocalRoute(): void {
+    const segment = this.track
+      ? localRouteSegment(this.track, this.center, LOCAL_ROUTE_RADIUS_M)
+      : null;
+    if (!segment) {
+      this.clearLocalRoute();
+      return;
+    }
+    const data = segment as unknown as GeoJSON.Feature;
+    const source = this.map.getSource(SOURCE_ROUTE);
+    if (source && 'setData' in source) {
+      (source as maplibregl.GeoJSONSource).setData(data);
+      return;
+    }
+    this.map.addSource(SOURCE_ROUTE, { type: 'geojson', data });
+    this.map.addLayer({
+      id: LAYER_ROUTE_HALO,
+      type: 'line',
+      source: SOURCE_ROUTE,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.8 },
+    });
+    this.map.addLayer({
+      id: LAYER_ROUTE,
+      type: 'line',
+      source: SOURCE_ROUTE,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#c2410c', 'line-width': 5 },
+    });
+  }
+
+  private clearLocalRoute(): void {
+    for (const id of [LAYER_ROUTE, LAYER_ROUTE_HALO]) {
+      if (this.map.getLayer(id)) this.map.removeLayer(id);
+    }
+    if (this.map.getSource(SOURCE_ROUTE)) this.map.removeSource(SOURCE_ROUTE);
+  }
+
+  /** トラックを差し替える（山が変わったとき）。 */
+  setTrack(track: TrackFeature | null): void {
+    this.track = track;
+    if (this.ready) this.renderLocalRoute();
+  }
+
   private renderHud(): void {
     const elevation = this.groundElevation > 0
       ? `<span class="terrain-hud__ele num">標高 ${Math.round(this.groundElevation)} m</span>`
@@ -275,6 +381,11 @@ export class Terrain3D {
     `;
   }
 
+  /** 足元のルートの説明。凡例として画面に出す。 */
+  static routeLegend(): string {
+    return `足元の朱線はルート（前後${LOCAL_ROUTE_RADIUS_M}m）`;
+  }
+
   // -------------------------------------------------------------------------
   // 出し入れ
   // -------------------------------------------------------------------------
@@ -282,10 +393,13 @@ export class Terrain3D {
   moveTo(center: LatLng, headingDeg: number, groundElevationM?: number): void {
     this.center = center;
     this.bearing = headingDeg;
-    this.pitch = DEFAULT_PITCH;
-    this.zoom = DEFAULT_ZOOM;
+    this.pitch = PRESETS[this.preset].pitch;
+    this.zoom = PRESETS[this.preset].zoom;
     this.groundElevation = groundElevationM ?? 0;
-    if (this.ready) this.addHereMarker();
+    if (this.ready) {
+      this.addHereMarker();
+      this.renderLocalRoute();
+    }
     this.apply();
   }
 

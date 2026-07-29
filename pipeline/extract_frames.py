@@ -198,41 +198,83 @@ def extract_final_frame(video: str, time_s: float, out_path: Path,
         f"{out_path.name} が上限 {max_bytes}B に収まりません（最小 {last_size}B）")
 
 
+def convert_photo(src: str | Path, out_path: Path,
+                  long_edge: int = FINAL_LONG_EDGE,
+                  max_bytes: int = FINAL_MAX_BYTES) -> dict[str, Any]:
+    """写真の原本を出題用のWebPにする。メタデータは全除去する。"""
+    _require_ffmpeg()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    last_size = 0
+    for quality in QUALITY_LADDER:
+        _run_ffmpeg([
+            "ffmpeg", "-v", "error", "-y", "-i", str(src),
+            "-vf", f"scale='if(gte(iw,ih),min({long_edge},iw),-2)':"
+                   f"'if(gte(iw,ih),-2,min({long_edge},ih))'",
+            "-c:v", "libwebp", "-quality", str(quality),
+            "-map_metadata", "-1",
+            str(out_path),
+        ], f"写真の変換({Path(src).name})")
+        last_size = out_path.stat().st_size
+        if last_size <= max_bytes:
+            return {"bytes": last_size, "quality": quality}
+    raise FrameExtractError(
+        f"{out_path.name} が上限 {max_bytes}B に収まりません（最小 {last_size}B）")
+
+
 def build_final_frames(confirmed_path: str, videos: dict[str, str], out_dir: str,
                        long_edge: int = FINAL_LONG_EDGE,
                        max_bytes: int = FINAL_MAX_BYTES,
                        quiet: bool = False) -> dict[str, Any]:
-    """confirmed_points.json の確定時刻から本番画像を作る。"""
+    """確定地点に割り当てられた画像を、原本から出題用に作り直す。
+
+    1地点に複数の画像を割り当てられる。ファイル名は `{point_id}-1.webp` のように
+    連番にし、**緯度経度は含めない**。
+    """
     data = json.loads(Path(confirmed_path).read_text(encoding="utf-8"))
     points = data.get("points", data if isinstance(data, list) else [])
     root = Path(out_dir)
 
     written: list[dict[str, Any]] = []
-    frameless = 0
+    imageless = 0
+    failed: list[str] = []
     for p in points:
-        if p.get("frame_time_s") is None:
-            frameless += 1
+        images = p.get("images") or []
+        if not images:
+            imageless += 1
             continue
-        video = resolve_video(videos, p.get("media_id"))
-        if not video:
-            frameless += 1
-            continue
-        # ファイル名に緯度経度を含めない（point_id のみ）
-        out_path = root / f"{p['id']}.webp"
-        info = extract_final_frame(video, float(p["frame_time_s"]), out_path,
-                                   long_edge, max_bytes)
-        written.append({"id": p["id"], "file": out_path.name, **info})
-        if not quiet and len(written) % 10 == 0:
+        for i, image in enumerate(images, start=1):
+            out_path = root / f"{p['id']}-{i}.webp"
+            try:
+                if image.get("kind") == "photo":
+                    source = image.get("source_path")
+                    if not source or not Path(source).exists():
+                        failed.append(f"{p['id']}: 写真 {image.get('source')} が見つかりません")
+                        continue
+                    info = convert_photo(source, out_path, long_edge, max_bytes)
+                else:
+                    video = resolve_video(videos, image.get("media_id"))
+                    if not video:
+                        failed.append(f"{p['id']}: 動画 {image.get('media_id')} が指定されていません")
+                        continue
+                    info = extract_final_frame(video, float(image["time_s"]), out_path,
+                                               long_edge, max_bytes)
+            except FrameExtractError as e:
+                failed.append(f"{p['id']}: {e}")
+                continue
+            written.append({"id": p["id"], "file": out_path.name, **info})
+        if not quiet and len(written) % 10 == 0 and written:
             print(f"  ... {len(written)}枚", file=sys.stderr)
 
     meta = {"points": len(points), "images_written": len(written),
-            "frameless": frameless, "out_dir": str(root),
+            "imageless": imageless, "failed": failed, "out_dir": str(root),
             "long_edge": long_edge, "max_bytes": max_bytes}
     if written:
         meta["max_written_bytes"] = max(w["bytes"] for w in written)
     if not quiet:
         print(f"本番画像: {len(written)}枚 → {root}"
-              + (f"（画像なし地点 {frameless}件は3Dビュー専用）" if frameless else ""))
+              + (f"（画像なし地点 {imageless}件は3Dビュー専用）" if imageless else ""))
+        for message in failed:
+            print(f"  失敗: {message}", file=sys.stderr)
     return meta
 
 

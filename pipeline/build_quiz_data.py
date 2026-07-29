@@ -42,8 +42,8 @@ TRACK_DIR = "data/tracks"
 
 #: 公開JSONに出してよいPointのフィールド（これ以外は落とす）
 PUBLIC_POINT_FIELDS = (
-    "id", "mountain_id", "lat", "lon", "elevation_m", "type", "image_path",
-    "media_id", "frame_time_s", "heading_deg", "heading_route_deg", "source",
+    "id", "mountain_id", "lat", "lon", "elevation_m", "type", "image_paths",
+    "heading_deg", "heading_route_deg", "source",
 )
 
 
@@ -99,7 +99,8 @@ def build_points(confirmed: dict[str, Any], images_dir: Optional[Path],
                  public_images_dir: Optional[Path]) -> list[dict[str, Any]]:
     """確定地点を公開用Pointに変換し、必要なら画像をコピーする。
 
-    画像を持つはずの地点（`frame_time_s` がある）で実ファイルが無ければエラー終了する。
+    画像を割り当てた地点（`images` がある）で実ファイルが無ければエラー終了する。
+    1地点に複数の画像を持てる（`{point_id}-1.webp`, `-2.webp` …）。
     """
     mountain_id = confirmed["mountain"]["id"]
     missing: list[str] = []
@@ -115,23 +116,24 @@ def build_points(confirmed: dict[str, Any], images_dir: Optional[Path],
             "source": p.get("source", "auto"),
         }
         # elevation_m は地理院DEM由来の公開情報。3Dビューで視点の高さに使う
-        for key in ("elevation_m", "media_id", "frame_time_s",
-                    "heading_deg", "heading_route_deg"):
+        for key in ("elevation_m", "heading_deg", "heading_route_deg"):
             if p.get(key) is not None:
                 point[key] = p[key]
 
-        # 動画フレーム（frame_time_s）でも写真（photo_source）でも画像を伴う
-        if p.get("frame_time_s") is not None or p.get("photo_source"):
-            filename = f"{p['id']}.webp"
+        paths: list[str] = []
+        for i in range(1, len(p.get("images") or []) + 1):
+            filename = f"{p['id']}-{i}.webp"
             src = (images_dir / filename) if images_dir else None
             if src is None or not src.exists():
-                missing.append(p["id"])
+                missing.append(filename)
                 continue
             if public_images_dir is not None:
                 dest_dir = public_images_dir / mountain_id
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dest_dir / filename)
-            point["image_path"] = f"images/{mountain_id}/{filename}"
+            paths.append(f"images/{mountain_id}/{filename}")
+        if paths:
+            point["image_paths"] = paths
 
         out.append({k: point[k] for k in PUBLIC_POINT_FIELDS if k in point})
 
@@ -235,7 +237,7 @@ def run(confirmed_path: str, gpx: Optional[str] = None,
     data_path.write_text(json.dumps(merged, ensure_ascii=False, indent=1),
                          encoding="utf-8")
 
-    with_image = sum(1 for p in points if "image_path" in p)
+    with_image = sum(1 for p in points if p.get("image_paths"))
     meta = {
         "out": str(data_path),
         "dataset_version": version,

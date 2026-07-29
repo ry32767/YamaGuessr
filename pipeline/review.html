@@ -50,12 +50,40 @@
   main { flex: 1; display: flex; min-height: 0; }
   #map { flex: 1; min-width: 0; }
   aside {
-    width: 380px; flex-shrink: 0; overflow-y: auto;
+    width: 330px; flex-shrink: 0; overflow-y: auto;
     background: var(--panel); border-left: 1px solid var(--line); padding: 12px;
   }
-  @media (max-width: 820px) {
-    main { flex-direction: column; }
-    aside { width: auto; border-left: none; border-top: 1px solid var(--line); max-height: 55%; }
+  #libraryPanel {
+    width: 330px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0;
+    background: var(--panel); border-left: 1px solid var(--line); padding: 12px;
+  }
+  .library-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .library {
+    flex: 1; min-height: 0; overflow-y: auto; margin-top: 8px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 6px;
+    align-content: start;
+  }
+  .lib {
+    display: flex; flex-direction: column; gap: 2px; padding: 3px;
+    background: #0e1218; border: 2px solid var(--line); border-radius: 6px;
+    cursor: pointer; color: var(--muted); font-size: 10px; text-align: center;
+  }
+  .lib img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 3px; display: block; }
+  .lib span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lib:hover { border-color: var(--accent); }
+  .lib--on { border-color: var(--ok); background: #10251a; color: var(--text); }
+  .lib--used { opacity: .45; }
+  .assigned { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .assigned__item {
+    padding: 3px; background: #0e1218; border: 2px solid var(--ok); border-radius: 6px;
+    cursor: pointer; color: var(--muted); font-size: 10px; width: 88px;
+  }
+  .assigned__item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 3px; display: block; }
+  @media (max-width: 1100px) {
+    main { flex-wrap: wrap; }
+    #map { flex-basis: 100%; min-height: 45vh; }
+    aside, #libraryPanel { width: 50%; border-left: none; border-top: 1px solid var(--line); }
+    .library { max-height: 40vh; }
   }
 
   .empty { color: var(--muted); line-height: 1.7; }
@@ -84,7 +112,7 @@
   .marker.selected { outline: 3px solid var(--accent); outline-offset: 2px; }
   .marker.adopted { border-color: #fff; box-shadow: 0 0 0 2px var(--ok); }
   .marker.rejected { opacity: .28; }
-  .marker.low-quality { border-style: dashed; border-width: 3px; }
+  .marker.has-images { border-width: 4px; border-color: var(--ok); }
   .marker.manual { border-radius: 3px; }
   .legend {
     position: absolute; left: 8px; bottom: 8px; z-index: 2;
@@ -123,16 +151,30 @@
       <b>使い方</b><br>
       1. リポジトリのルートで <code>python -m http.server</code> を実行し、
          <code>/pipeline/review.html</code> を開く<br>
-      2. <code>pipeline/data/</code> の candidates.json などを自動で読み込む<br>
-      3. ピンをクリック → <b>A</b> で採用 / <b>R</b> で却下<br>
-      4. 採用したら ← → で切り出し時刻を0.5秒ずつ調整<br>
-      5. 地図の空白を <b>Shift+クリック</b> で地点を手動追加<br>
+      2. <code>pipeline/data/</code> の candidates.json と library/index.json を自動で読み込む<br>
+      3. 地図のピンをクリックして地点を選ぶ<br>
+      4. 右の一覧から、<b>その地点で撮った画像</b>をクリックして割り当てる（複数可）<br>
+      5. いらない候補は <b>R</b> で却下。地図の空白を <b>Shift+クリック</b> で地点を手動追加<br>
       6. 「書き出し」で confirmed_points.json を保存<br><br>
-      読み込めない場合は「ファイルを読み込む」から candidates.json /
-      track.json / previews/index.json を選んでください。
+      画像が無いままの地点は、3D地形だけで出題する地点になります。
     </p>
     <div id="detail" hidden></div>
   </aside>
+
+  <section id="libraryPanel">
+    <div class="library-head">
+      <b>画像ライブラリ</b>
+      <span class="spacer"></span>
+      <select id="libraryFilter">
+        <option value="all">すべて</option>
+        <option value="unused">未使用のみ</option>
+        <option value="video">動画から</option>
+        <option value="photo">写真</option>
+      </select>
+    </div>
+    <div id="libraryInfo" class="hint"></div>
+    <div id="library" class="library"></div>
+  </section>
 </main>
 
 <input type="file" id="filePicker" multiple accept=".json" hidden>
@@ -160,23 +202,19 @@ const BASE_MAPS = {
   relief: 'https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png',
   seamlessphoto: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
 };
-const PREVIEW_WINDOW_S = 5.0;
-const PREVIEW_STEP_S = 0.5;
-//: 手動追加した地点にテレメトリ時刻を紐づける最大距離 [m]
-const MANUAL_LINK_MAX_M = 200;
 const DATA_BASE = 'data/';
+const LIBRARY_BASE = DATA_BASE + 'library/';
 
 // ---------------------------------------------------------------------------
 // 状態
 // ---------------------------------------------------------------------------
 const state = {
-  candidates: [],      // {…candidate, _status:'pending'|'adopted'|'rejected', _offset:0}
-  track: null,         // match_gpx.py の track.json
-  previews: null,      // previews/index.json の previews 部分
-  previewBase: DATA_BASE + 'previews/',
+  candidates: [],      // {…candidate, _status:'pending'|'adopted'|'rejected', _images:[]}
+  library: [],         // build_library.py が作った画像の一覧
   selectedId: null,
   manualSeq: 0,
   markers: new Map(),
+  libraryFilter: 'all',
 };
 
 // ---------------------------------------------------------------------------
@@ -235,7 +273,7 @@ function adoptCandidates(data) {
   state.candidates = list.map((c) => ({
     ...c,
     _status: 'pending',
-    _offset: 0,
+    _images: [],   // この地点に割り当てた画像（ライブラリの項目）
   }));
   state.manualSeq = 0;
   renderMarkers();
@@ -254,10 +292,10 @@ function fitToCandidates() {
 async function autoLoad() {
   const candidates = await tryFetchJson(DATA_BASE + 'candidates.json');
   if (candidates) adoptCandidates(candidates);
-  state.track = await tryFetchJson(DATA_BASE + 'track.json');
-  const previews = await tryFetchJson(state.previewBase + 'index.json');
-  if (previews) state.previews = previews.previews || null;
+  const library = await tryFetchJson(LIBRARY_BASE + 'index.json');
+  if (library) state.library = library.images || [];
   updateCounts();
+  renderLibrary();
 }
 
 document.getElementById('loadBtn').addEventListener('click', () => {
@@ -274,11 +312,11 @@ document.getElementById('filePicker').addEventListener('change', async (e) => {
       continue;
     }
     if (json.candidates) adoptCandidates(json);
-    else if (json.samples) state.track = json;
-    else if (json.previews) state.previews = json.previews;
-    else alert(file.name + ' は candidates / track / previews のいずれでもありません');
+    else if (json.images) state.library = json.images;
+    else alert(file.name + ' は candidates / library のいずれでもありません');
   }
   updateCounts();
+  renderLibrary();
   renderDetail();
 });
 
@@ -289,7 +327,8 @@ function markerClass(c) {
   const cls = ['marker'];
   if (c._status === 'adopted') cls.push('adopted');
   if (c._status === 'rejected') cls.push('rejected');
-  if (c.low_quality) cls.push('low-quality');
+  // 画像を割り当てた地点は太い枠で見分ける（色だけに頼らない）
+  if (c._images && c._images.length) cls.push('has-images');
   if (c.type === 'manual') cls.push('manual');
   if (c.id === state.selectedId) cls.push('selected');
   return cls.join(' ');
@@ -336,6 +375,7 @@ function select(id) {
   state.selectedId = id;
   refreshAllMarkers();
   renderDetail();
+  renderLibrary();
   const c = selected();
   if (c) map.easeTo({ center: [c.lon, c.lat], duration: 300 });
 }
@@ -349,49 +389,85 @@ function setStatus(status) {
   renderDetail();
 }
 
-function shiftOffset(delta) {
+// ---------------------------------------------------------------------------
+// 画像の割り当て
+// ---------------------------------------------------------------------------
+/** 選択中の地点に画像を足す／外す。 */
+function toggleImage(image) {
   const c = selected();
-  if (!c || c.frame_time_s === undefined) return;
-  const next = Math.round((c._offset + delta) * 2) / 2;
-  c._offset = Math.max(-PREVIEW_WINDOW_S, Math.min(PREVIEW_WINDOW_S, next));
+  if (!c) {
+    alert('先に地点を選んでください');
+    return;
+  }
+  const at = c._images.findIndex((i) => i.id === image.id);
+  if (at >= 0) c._images.splice(at, 1);
+  else c._images.push(image);
+  // 画像を割り当てたら自動で採用にする（外して0枚になっても採用は保つ）
+  if (c._images.length > 0 && c._status !== 'adopted') c._status = 'adopted';
+  refreshMarker(c);
+  updateCounts();
   renderDetail();
+  renderLibrary();
 }
 
-function offsetKey(off) {
-  const sign = off < 0 ? 'm' : 'p';
-  return sign + Math.abs(off).toFixed(1).replace('.', '_');
+function isAssigned(imageId) {
+  const c = selected();
+  return Boolean(c && c._images.some((i) => i.id === imageId));
 }
 
-function previewUrl(c) {
-  if (!state.previews || c.frame_time_s === undefined) return null;
-  const entry = state.previews[c.id];
-  if (!entry) return null;
-  const file = offsetKey(c._offset) + '.jpg';
-  const known = entry.frames.some((f) => f.file === file);
-  if (!known) return null;
-  return state.previewBase + encodeURIComponent(c.id) + '/' + file;
+/** その画像がどこかの地点で使われているか（使い回しを見分けるため）。 */
+function usedSomewhere(imageId) {
+  return state.candidates.some((c) => c._images.some((i) => i.id === imageId));
+}
+
+function filteredLibrary() {
+  if (state.libraryFilter === 'photo') return state.library.filter((i) => i.kind === 'photo');
+  if (state.libraryFilter === 'video') return state.library.filter((i) => i.kind === 'video_frame');
+  if (state.libraryFilter === 'unused') return state.library.filter((i) => !usedSomewhere(i.id));
+  return state.library;
+}
+
+function renderLibrary() {
+  const grid = document.getElementById('library');
+  const info = document.getElementById('libraryInfo');
+  if (!state.library.length) {
+    grid.innerHTML = '';
+    info.innerHTML =
+      '画像がありません。<code>build_library.py</code> で動画・写真から一覧を作ってください。';
+    return;
+  }
+  const list = filteredLibrary();
+  const c = selected();
+  info.textContent = c
+    ? `${list.length}枚（${c.id} に ${c._images.length}枚 割り当て済み）`
+    : `${list.length}枚。地点を選んでから画像をクリックすると割り当てます`;
+
+  grid.innerHTML = list.map((image) => {
+    const label = image.kind === 'photo'
+      ? image.source
+      : `${image.media_id} ${image.time_s}s`;
+    const cls = ['lib']
+      .concat(isAssigned(image.id) ? ['lib--on'] : [])
+      .concat(!isAssigned(image.id) && usedSomewhere(image.id) ? ['lib--used'] : [])
+      .join(' ');
+    return `<button class="${cls}" data-id="${image.id}" title="${label}">
+      <img src="${LIBRARY_BASE + encodeURIComponent(image.file)}" alt="${label}" loading="lazy">
+      <span>${label}</span></button>`;
+  }).join('');
+
+  grid.querySelectorAll('.lib').forEach((node) => {
+    node.addEventListener('click', () => {
+      const image = state.library.find((i) => i.id === node.dataset.id);
+      if (image) toggleImage(image);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
 // 手動追加
 // ---------------------------------------------------------------------------
-function nearestTrackSample(lat, lon) {
-  if (!state.track || !state.track.samples) return null;
-  let best = null;
-  let bestD = Infinity;
-  for (const s of state.track.samples) {
-    if (s.suspect) continue;
-    const dLat = (s.lat - lat) * 111320;
-    const dLon = (s.lon - lon) * 111320 * Math.cos((lat * Math.PI) / 180);
-    const d = dLat * dLat + dLon * dLon;
-    if (d < bestD) { bestD = d; best = s; }
-  }
-  return best ? { sample: best, distance_m: Math.sqrt(bestD) } : null;
-}
-
 function addManualPoint(lat, lon) {
   state.manualSeq += 1;
-  const near = nearestTrackSample(lat, lon);
   const c = {
     id: 'manual-' + String(state.manualSeq).padStart(4, '0'),
     type: 'manual',
@@ -399,19 +475,9 @@ function addManualPoint(lat, lon) {
     score: 1,
     detail: {},
     _status: 'adopted',
-    _offset: 0,
+    _images: [],
     source: 'manual',
   };
-  if (near) c._nearest_m = Math.round(near.distance_m);
-  // 遠すぎるサンプルを紐づけると、まったく違う場所のフレームが出題されてしまう。
-  // 別の山の track.json を読み込んでいる場合もここで弾かれる。
-  if (near && near.distance_m <= MANUAL_LINK_MAX_M) {
-    c.frame_time_s = near.sample.time_s;
-    c.media_id = near.sample.media_id;
-    c.heading_deg = near.sample.heading_deg;
-    c.heading_route_deg = near.sample.heading_route_deg;
-    c.route_distance_m = near.sample.route_distance_m;
-  }
   state.candidates.push(c);
   renderMarkers();
   select(c.id);
@@ -424,17 +490,18 @@ function addManualPoint(lat, lon) {
 function updateCounts() {
   const total = state.candidates.length;
   const adopted = state.candidates.filter((c) => c._status === 'adopted').length;
-  const rejected = state.candidates.filter((c) => c._status === 'rejected').length;
+  const withImages = state.candidates.filter(
+    (c) => c._status === 'adopted' && c._images.length > 0).length;
   const el = document.getElementById('counts');
   el.innerHTML = total
-    ? `候補 <b>${total}</b> / 採用 <b>${adopted}</b> / 却下 <b>${rejected}</b>` +
-      (state.previews ? '' : ' <span style="color:var(--warn)">プレビュー未生成</span>')
+    ? `候補 <b>${total}</b> / 採用 <b>${adopted}</b> / 画像付き <b>${withImages}</b>` +
+      (state.library.length ? '' : ' <span style="color:var(--warn)">画像ライブラリ未生成</span>')
     : '未読み込み';
   document.getElementById('exportBtn').disabled = adopted === 0;
   document.getElementById('legend').innerHTML = Object.keys(TYPE_LABELS)
     .map((t) => `<div><i style="background:${TYPE_COLORS[t]}"></i>${TYPE_LABELS[t]}</div>`)
     .join('') +
-    '<div style="margin-top:4px;color:var(--muted)">破線＝low_quality</div>';
+    '<div style="margin-top:4px;color:var(--muted)">太い緑枠＝画像を割り当て済み</div>';
 }
 
 function fmt(v, digits = 1) {
@@ -453,9 +520,6 @@ function renderDetail() {
   empty.hidden = true;
   detail.hidden = false;
 
-  const hasFrame = c.frame_time_s !== undefined;
-  const t = hasFrame ? c.frame_time_s + c._offset : null;
-  const url = previewUrl(c);
   const statusLabel = { adopted: '採用', rejected: '却下', pending: '未判定' }[c._status];
 
   const details = Object.entries(c.detail || {})
@@ -475,56 +539,37 @@ function renderDetail() {
       <button class="adopt" id="adoptBtn">採用 (A)</button>
       <button class="reject" id="rejectBtn">却下 (R)</button>
     </div>
-    ${hasFrame ? `
-      <div id="previewWrap">
-        ${url
-          ? `<img class="preview" src="${url}" alt="切り出しプレビュー">`
-          : `<div class="preview preview-missing">プレビュー画像がありません<br>
-             <code>extract_frames.py previews</code> を実行してください</div>`}
-      </div>
-      <div class="row">
-        <button id="prevBtn">←</button>
-        <span style="min-width:9rem;text-align:center">
-          ${fmt(t, 2)} 秒 <span style="color:var(--muted)">(${c._offset >= 0 ? '+' : ''}${fmt(c._offset, 1)})</span>
-        </span>
-        <button id="nextBtn">→</button>
-        <button id="resetBtn">±0に戻す</button>
-      </div>
-      <input type="range" id="offsetRange" min="${-PREVIEW_WINDOW_S}" max="${PREVIEW_WINDOW_S}"
-             step="${PREVIEW_STEP_S}" value="${c._offset}">
-    ` : `
-      <p class="hint">${c._nearest_m !== undefined && c._nearest_m > MANUAL_LINK_MAX_M
-        ? `最寄りのテレメトリが <b>${c._nearest_m} m</b> 先で、
-           紐づけ上限 ${MANUAL_LINK_MAX_M} m を超えています。
-           別の山の track.json を読み込んでいないか確認してください。<br>`
-        : ''}この候補は動画フレームを持ちません（GPXのみで検出、または手動追加）。
-      <b>モード②（3D地形）専用</b>の出題地点になります。</p>
-    `}
+    <div class="assigned">
+      ${c._images.length
+        ? c._images.map((image, i) => `
+            <button class="assigned__item" data-remove="${image.id}"
+                    title="クリックで外す">
+              <img src="${LIBRARY_BASE + encodeURIComponent(image.file)}" alt="">
+              <span>${i + 1}枚目</span>
+            </button>`).join('')
+        : `<p class="hint">まだ画像を割り当てていません。右の一覧から、この地点で
+           撮った（＝この地点から見えた）画像をクリックして選んでください。<br>
+           0枚のままなら <b>モード②（3D地形）専用</b>の出題地点になります。</p>`}
+    </div>
     <dl class="kv">
       <dt>緯度経度</dt><dd>${c.lat.toFixed(6)}, ${c.lon.toFixed(6)}</dd>
       <dt>標高</dt><dd>${fmt(c.elevation_m)} m</dd>
       <dt>経路長</dt><dd>${fmt(c.route_distance_m)} m</dd>
       <dt>スコア</dt><dd>${fmt(c.score, 2)}</dd>
-      ${c.media_id ? `<dt>メディア</dt><dd>${c.media_id}</dd>` : ''}
-      ${c.heading_deg !== undefined ? `<dt>カメラ方位</dt><dd>${fmt(c.heading_deg)}°</dd>` : ''}
       ${c.heading_route_deg !== undefined ? `<dt>進行方位</dt><dd>${fmt(c.heading_route_deg)}°</dd>` : ''}
-      ${c._nearest_m !== undefined ? `<dt>最寄りサンプル</dt><dd>${c._nearest_m} m</dd>` : ''}
       ${details}
     </dl>
-    <p class="hint">Shift+地図クリックで手動追加。A=採用 / R=却下 / ←→=時刻調整 / N=次の未判定</p>
+    <p class="hint">Shift+地図クリックで手動追加。A=採用 / R=却下 / N=次の未判定</p>
   `;
 
   document.getElementById('adoptBtn').onclick = () => setStatus('adopted');
   document.getElementById('rejectBtn').onclick = () => setStatus('rejected');
-  if (hasFrame) {
-    document.getElementById('prevBtn').onclick = () => shiftOffset(-PREVIEW_STEP_S);
-    document.getElementById('nextBtn').onclick = () => shiftOffset(PREVIEW_STEP_S);
-    document.getElementById('resetBtn').onclick = () => { c._offset = 0; renderDetail(); };
-    document.getElementById('offsetRange').oninput = (e) => {
-      c._offset = parseFloat(e.target.value);
-      renderDetail();
-    };
-  }
+  detail.querySelectorAll('[data-remove]').forEach((node) => {
+    node.addEventListener('click', () => {
+      const image = c._images.find((i) => i.id === node.dataset.remove);
+      if (image) toggleImage(image);
+    });
+  });
 }
 
 function selectNextPending() {
@@ -541,8 +586,6 @@ document.addEventListener('keydown', (e) => {
   if (key === 'a') { setStatus('adopted'); e.preventDefault(); }
   else if (key === 'r') { setStatus('rejected'); e.preventDefault(); }
   else if (key === 'n') { selectNextPending(); e.preventDefault(); }
-  else if (e.key === 'ArrowLeft') { shiftOffset(-PREVIEW_STEP_S); e.preventDefault(); }
-  else if (e.key === 'ArrowRight') { shiftOffset(PREVIEW_STEP_S); e.preventDefault(); }
 });
 
 // ---------------------------------------------------------------------------
@@ -567,13 +610,17 @@ function buildConfirmed() {
       lon: Number(c.lon.toFixed(7)),
       source: c.source === 'manual' || c.type === 'manual' ? 'manual' : 'auto',
       candidate_id: c.id,
+      // 割り当てた画像。原本から出題用に作り直すのに必要な情報だけを残す
+      images: c._images.map((image) => ({
+        id: image.id,
+        kind: image.kind,
+        media_id: image.media_id,
+        time_s: image.time_s,
+        source: image.source,
+        source_path: image.source_path,
+      })),
     };
-    if (c.frame_time_s !== undefined) {
-      point.frame_time_s = Math.round((c.frame_time_s + c._offset) * 100) / 100;
-      if (c.media_id) point.media_id = c.media_id;
-    }
     if (c.elevation_m !== undefined) point.elevation_m = c.elevation_m;
-    if (c.heading_deg !== undefined) point.heading_deg = c.heading_deg;
     if (c.heading_route_deg !== undefined) point.heading_route_deg = c.heading_route_deg;
     return point;
   });
@@ -596,9 +643,14 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+document.getElementById('libraryFilter').addEventListener('change', (e) => {
+  state.libraryFilter = e.target.value;
+  renderLibrary();
+});
+
 // テストから叩けるように公開する
 window.__review = { state, buildConfirmed, addManualPoint, select, setStatus,
-                    shiftOffset, offsetKey, adoptCandidates, nearestTrackSample };
+                    adoptCandidates, toggleImage, renderLibrary, filteredLibrary };
 
 updateCounts();
 autoLoad();

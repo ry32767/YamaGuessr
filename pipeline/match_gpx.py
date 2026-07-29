@@ -10,8 +10,9 @@
     テレメトリの生GPSを GPX ルート上の最近傍点に落とす。GPSが更新されている動画向け。
 ``time``
     ファイル名由来の撮影開始時刻＋``capture_us`` の経過から実時刻を求め、
-    GPX のトラックポイントを時刻で内挿する。GPSが死んでいる／無い動画向け。
-    タイムラプスでも実時刻で引くので倍率の影響を受けない。
+    GPX のトラックポイントを時刻で内挿する。**GPXの時刻が「実際に歩いた記録」だと
+    確認できているときだけ使うこと。** 計画のGPXでは時刻が実際とずれるので、
+    位置がまったく合わない。そのため ``auto`` では選ばれない。
 
 複数の動画（DJIの自動分割）をまとめて渡せる。各サンプルには ``media_id`` が付く。
 
@@ -125,17 +126,23 @@ def load_media(telemetry_path: Path, tz: timezone,
 # 照合
 # ---------------------------------------------------------------------------
 def choose_mode(media: Sequence[dict[str, Any]], track: GpxTrack, mode: str) -> str:
-    """``auto`` のとき、GPSの状態とGPXの時刻有無から照合方式を決める。"""
+    """``auto`` のとき、GPSの状態から照合方式を決める。
+
+    **時刻照合は auto では選ばない。** GPXの時刻は「計画」であることがあり
+    （ヤマレコ／YAMAPの計画をそのまま書き出した場合など）、実際に歩いた時刻とは
+    無関係になりうる。時刻を信じてよいと分かっているときだけ `--mode time` を
+    明示すること（docs/spec.md の設計判断表）。
+    """
     if mode != "auto":
         return mode
     live_gps = any(m["distinct_gps_fix_count"] >= 2 for m in media)
     if live_gps:
         return "snap"
-    if track.has_time:
-        return "time"
     raise MatchError(
-        "テレメトリGPSが動いておらず、GPXにも時刻がありません。"
-        "位置を決める根拠が無いため照合できません（--mode snap で強行は可能）"
+        "テレメトリGPSが動いていないため、座標スナップができません。\n"
+        "GPXの時刻が『実際に歩いた記録』だと確認できているなら --mode time を指定してください。\n"
+        "計画のGPXなら時刻は当てにならないので、動画は画像の供給源として扱い、"
+        "地点は detect_candidates.py（GPXの形だけ）で作ってください。"
     )
 
 
@@ -366,6 +373,9 @@ def run(gpx_path: str, telemetry_paths: Sequence[str], out_path: str,
         print(f"GPX: {len(track.points)}点 / 全長 {meta['gpx']['length_m']}m "
               f"/ 時刻{'あり' if track.has_time else 'なし'}")
         print(f"照合方式: {resolved_mode}（要求: {mode}）")
+        if resolved_mode == "time":
+            print("注意: GPXの時刻を信じた照合です。計画のGPXでは位置がまったく合いません",
+                  file=sys.stderr)
         print(f"サンプル: {len(samples)}件  書き出し: {out}")
         if suspect_count:
             reason = "GPX から離れすぎ" if resolved_mode == "snap" else "GPX の時刻範囲外"

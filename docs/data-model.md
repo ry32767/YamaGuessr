@@ -17,8 +17,7 @@ erDiagram
         float lat "GPX由来"
         float lon "GPX由来"
         string type
-        string image_path "任意。無ければ3D専用"
-        float frame_time_s "任意"
+        string image_paths "任意・複数可。無ければ3D専用"
     }
     PLAYER ||--o{ SCORE : posts
     PLAYER {
@@ -56,10 +55,10 @@ erDiagram
       "lat": 34.1851909,
       "lon": 136.1093076,
       "type": "peak",
-      "image_path": "images/yamada-2026-07-11/003.webp",
-      "media_id": "DJI_20260711125358_0029_D",
-      "frame_time_s": 41.5,
-      "heading_deg": 128.4,
+      "image_paths": [
+        "images/yamada-2026-07-11/yamada-2026-07-11-003-1.webp",
+        "images/yamada-2026-07-11/yamada-2026-07-11-003-2.webp"
+      ],
       "heading_route_deg": 121.0,
       "source": "auto"
     },
@@ -85,9 +84,7 @@ erDiagram
 | `Point.lat/lon` | **GPXルート上にスナップ済みの座標**（生GPSではない。理由は[spec.md](spec.md)の設計判断表） |
 | `Point.type` | `bend`(ルート屈曲) / `ridge_view`(尾根谷が見える) / `ridge_start`(尾根に乗り始め) / `peak` / `col` / `manual`(手動追加) / `photo`(写真1枚から作った地点) |
 | `Point.elevation_m` | 地理院DEM由来の標高。**3Dビューで視点をこの高さに置く**ためにフロントへ渡す（タイル読み込みを待たずに正しい視点を作れる） |
-| `Point.image_path` | **任意**。省略された地点は画像を持たず、**モード②（3D地形）専用**として出題する（[spec.md](spec.md)の設計判断表） |
-| `Point.media_id` | 画像の出所メディア（分割動画・後から足した素材の識別）。画像が無い地点では省略 |
-| `Point.frame_time_s` | レビューで確定した切り出し時刻（動画先頭からの秒）。画像が無い地点では省略 |
+| `Point.image_paths` | **任意・複数可**。レビューで人が割り当てた画像。省略／空の地点は**モード②（3D地形）専用**として出題する（[spec.md](spec.md)の設計判断表）。画像の出所（動画名・切り出し秒）は公開しない |
 | `Point.heading_deg` | カメラ方位。モード②の3Dビュー初期視点に使用。算出不能な場合は省略し、`heading_route_deg`（進行方位）で代用する |
 | `Point.heading_route_deg` | GPXルートの進行方位。`heading_deg`が無い地点のフォールバック |
 | `Point.source` | `auto`（自動検出→採用）／`manual`（レビュー時に人間が追加） |

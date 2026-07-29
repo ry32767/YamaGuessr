@@ -22,11 +22,17 @@ def _confirmed(tmp_path: Path, points: list[dict[str, Any]],
     return path
 
 
-def _image(dir_: Path, point_id: str) -> Path:
+def _image(dir_: Path, point_id: str, index: int = 1) -> Path:
     dir_.mkdir(parents=True, exist_ok=True)
-    p = dir_ / f"{point_id}.webp"
+    p = dir_ / f"{point_id}-{index}.webp"
     p.write_bytes(b"RIFF____WEBPVP8 fake")
     return p
+
+
+def _assigned(count: int = 1) -> list[dict[str, Any]]:
+    """レビューで割り当てた画像（confirmed_points.json の images）。"""
+    return [{"id": f"clip-{i:05d}", "kind": "video_frame", "media_id": "clip",
+             "time_s": float(i)} for i in range(count)]
 
 
 def _point(idx: int, **kw: Any) -> dict[str, Any]:
@@ -84,7 +90,7 @@ def test_quiz_points_matches_the_schema(tmp_path: Path) -> None:
     images = tmp_path / "frames"
     _image(images, f"{MOUNTAIN['id']}-001")
     confirmed = _confirmed(tmp_path, [
-        _point(1, media_id="clip", frame_time_s=41.5, heading_deg=128.4),
+        _point(1, images=_assigned(1), heading_deg=128.4),
         _point(2, type="col", source="manual"),        # 3D専用（画像なし）
     ])
     meta = bq.run(str(confirmed), images_dir=str(images),
@@ -99,21 +105,34 @@ def test_quiz_points_matches_the_schema(tmp_path: Path) -> None:
     assert m["scoring_k"] == 4.0
 
     p1, p2 = data["points"]
-    assert p1["image_path"] == f"images/{MOUNTAIN['id']}/{MOUNTAIN['id']}-001.webp"
+    assert p1["image_paths"] == [f"images/{MOUNTAIN['id']}/{MOUNTAIN['id']}-001-1.webp"]
     assert p1["heading_deg"] == 128.4
-    assert "image_path" not in p2      # 画像なし地点はモード②専用
+    assert "image_paths" not in p2      # 画像なし地点はモード②専用
     assert meta["with_image"] == 1
     assert meta["terrain_only"] == 1
+
+
+def test_multiple_images_per_point(tmp_path: Path) -> None:
+    """1地点に複数の画像を割り当てられる。"""
+    images = tmp_path / "frames"
+    for i in (1, 2, 3):
+        _image(images, f"{MOUNTAIN['id']}-001", i)
+    confirmed = _confirmed(tmp_path, [_point(1, images=_assigned(3))])
+    meta = bq.run(str(confirmed), images_dir=str(images),
+                  public_dir=str(tmp_path / "public"), quiet=True)
+    point = json.loads(Path(meta["out"]).read_text(encoding="utf-8"))["points"][0]
+    assert len(point["image_paths"]) == 3
+    assert point["image_paths"][2].endswith("-3.webp")
 
 
 def test_images_are_copied_into_public(tmp_path: Path) -> None:
     images = tmp_path / "frames"
     _image(images, f"{MOUNTAIN['id']}-001")
-    confirmed = _confirmed(tmp_path, [_point(1, media_id="c", frame_time_s=1.0)])
+    confirmed = _confirmed(tmp_path, [_point(1, images=_assigned(1))])
     public = tmp_path / "public"
     bq.run(str(confirmed), images_dir=str(images), public_dir=str(public), quiet=True)
     assert (public / "images" / MOUNTAIN["id"] /
-            f"{MOUNTAIN['id']}-001.webp").exists()
+            f"{MOUNTAIN['id']}-001-1.webp").exists()
 
 
 def test_intermediate_fields_are_not_published(tmp_path: Path) -> None:
@@ -121,7 +140,7 @@ def test_intermediate_fields_are_not_published(tmp_path: Path) -> None:
     images = tmp_path / "frames"
     _image(images, f"{MOUNTAIN['id']}-001")
     confirmed = _confirmed(tmp_path, [
-        _point(1, media_id="c", frame_time_s=1.0,
+        _point(1, images=_assigned(1),
                raw_lat=34.0, raw_lon=135.0,
                snap_distance_m=31900.0, blur_score=2100.0, low_quality=False,
                aux1=4.6, candidate_id="cand-0007"),
@@ -129,21 +148,23 @@ def test_intermediate_fields_are_not_published(tmp_path: Path) -> None:
     meta = bq.run(str(confirmed), images_dir=str(images),
                   public_dir=str(tmp_path / "public"), quiet=True)
     raw = Path(meta["out"]).read_text(encoding="utf-8")
+    # 出所（動画名・切り出し時刻）も公開しない。答えの手がかりになりうる
     for banned in ("raw_lat", "raw_lon", "snap_distance_m", "blur_score",
-                   "low_quality", "aux1", "candidate_id", "raw_lon"):
+                   "low_quality", "aux1", "candidate_id", "media_id",
+                   "frame_time_s", '"images"'):
         assert banned not in raw
 
 
 def test_missing_image_is_a_hard_error(tmp_path: Path) -> None:
     confirmed = _confirmed(tmp_path, [
-        _point(1, media_id="c", frame_time_s=1.0),
-        _point(2, media_id="c", frame_time_s=2.0),
+        _point(1, images=_assigned(1)),
+        _point(2, images=_assigned(1)),
     ])
     with pytest.raises(bq.BuildError) as e:
         bq.run(str(confirmed), images_dir=str(tmp_path / "frames"),
                public_dir=str(tmp_path / "public"), quiet=True)
-    assert f"{MOUNTAIN['id']}-001" in str(e.value)
-    assert f"{MOUNTAIN['id']}-002" in str(e.value)
+    assert f"{MOUNTAIN['id']}-001-1.webp" in str(e.value)
+    assert f"{MOUNTAIN['id']}-002-1.webp" in str(e.value)
 
 
 def test_gpx_determines_max_distance(tmp_path: Path) -> None:

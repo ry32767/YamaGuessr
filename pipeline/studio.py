@@ -50,8 +50,7 @@ UPLOAD_KINDS: dict[str, tuple[Path, set[str]]] = {
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
 
 #: 画面から実行できる工程。argv は studio.html 側の入力から組み立てる
-STEPS = ("telemetry", "match", "detect", "previews", "frames", "build",
-         "adopt_all", "photos")
+STEPS = ("library", "detect", "frames", "build", "adopt_all", "telemetry", "match")
 
 
 class Job:
@@ -197,10 +196,9 @@ def list_state() -> dict[str, Any]:
         "unsupported_photos": unsupported_photos,
         "mountains": mountains,
         "intermediate": {
-            "telemetry": exists("pipeline/data/telemetry.json"),
+            "library": exists("pipeline/data/library/index.json"),
             "track": exists("pipeline/data/track.json"),
             "candidates": exists("pipeline/data/candidates.json"),
-            "previews": exists("pipeline/data/previews/index.json"),
             "confirmed": exists("pipeline/data/confirmed_points.json"),
             "frames": exists("pipeline/data/frames"),
         },
@@ -257,15 +255,15 @@ def build_argv(step: str, params: dict[str, Any]) -> tuple[str, list[str]]:
             argv += ["--video", f"{Path(video).stem}={video}"]
         return ("候補検出", argv)
 
-    if step == "previews":
-        if not videos:
-            raise ValueError("プレビューには動画が要ります")
-        argv = [py, "pipeline/extract_frames.py", "previews",
-                "--candidates", "pipeline/data/candidates.json",
-                "--out-dir", "pipeline/data/previews"]
+    if step == "library":
+        argv = [py, "pipeline/build_library.py",
+                "--out-dir", "pipeline/data/library",
+                "--photos-dir", "Source/photos"]
         for video in videos:
             argv += ["--video", f"{Path(video).stem}={video}"]
-        return ("レビュー用プレビュー生成", argv)
+        if params.get("interval_s"):
+            argv += ["--interval-s", str(params["interval_s"])]
+        return ("画像ライブラリの作成", argv)
 
     if step == "adopt_all":
         if not mountain_id or not mountain_name:
@@ -277,31 +275,13 @@ def build_argv(step: str, params: dict[str, Any]) -> tuple[str, list[str]]:
             "--out", "pipeline/data/confirmed_points.json",
         ])
 
-    if step == "photos":
-        if not gpx:
-            raise ValueError("写真の位置はGPXから決めるので、GPXを選んでください")
-        if not mountain_id or not mountain_name:
-            raise ValueError("山IDと山名を入力してください")
-        argv = [py, "pipeline/import_photos.py", "--gpx", gpx,
-                "--photos-dir", "Source/photos",
-                "--mountain-id", mountain_id, "--mountain-name", mountain_name,
-                "--out", "pipeline/data/confirmed_points.json",
-                "--images-out", "pipeline/data/frames"]
-        if params.get("tz"):
-            argv += ["--tz", str(params["tz"])]
-        if params.get("time_offset_s"):
-            argv += ["--time-offset-s", str(params["time_offset_s"])]
-        return ("写真の取り込み", argv)
-
     if step == "frames":
-        if not videos:
-            raise ValueError("画像の切り出しには動画が要ります")
         argv = [py, "pipeline/extract_frames.py", "final",
                 "--confirmed", "pipeline/data/confirmed_points.json",
                 "--out-dir", "pipeline/data/frames"]
         for video in videos:
             argv += ["--video", f"{Path(video).stem}={video}"]
-        return ("本番画像の切り出し", argv)
+        return ("出題用画像の書き出し", argv)
 
     if step == "build":
         argv = [py, "pipeline/build_quiz_data.py",

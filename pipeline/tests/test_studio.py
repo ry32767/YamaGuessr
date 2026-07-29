@@ -131,7 +131,7 @@ def test_build_argv_detect_prefers_track_then_gpx() -> None:
 
 
 def test_build_argv_video_mapping_uses_media_id() -> None:
-    _l, argv = studio.build_argv("previews", {"videos": ["Source/DJI_0007.MP4"]})
+    _l, argv = studio.build_argv("library", {"videos": ["Source/DJI_0007.MP4"]})
     assert "DJI_0007=Source/DJI_0007.MP4" in argv
 
 
@@ -157,21 +157,19 @@ def test_build_argv_adopt_all_passes_mountain() -> None:
     assert "大台ヶ原" in argv
 
 
-def test_build_argv_photos_needs_gpx_and_mountain() -> None:
-    _l, argv = studio.build_argv("photos", {
-        "gpx": "Source/r.gpx", "mountain_id": "m", "mountain_name": "山",
-        "tz": "+09:00", "time_offset_s": 30,
+def test_build_argv_library_takes_videos_and_photos() -> None:
+    """画像ライブラリは動画も写真もまとめて作る。GPXも山IDも要らない。"""
+    _l, argv = studio.build_argv("library", {
+        "videos": ["Source/a.MP4"], "interval_s": 3,
     })
-    assert "pipeline/import_photos.py" in argv
+    assert "pipeline/build_library.py" in argv
     assert "Source/photos" in argv
-    assert "--tz" in argv and "+09:00" in argv
-    assert "--time-offset-s" in argv and "30" in argv
+    assert "a=Source/a.MP4" in argv
+    assert "--interval-s" in argv and "3" in argv
 
-    with pytest.raises(ValueError):
-        studio.build_argv("photos", {"gpx": "", "mountain_id": "m", "mountain_name": "山"})
-    with pytest.raises(ValueError):
-        studio.build_argv("photos", {"gpx": "Source/r.gpx", "mountain_id": "",
-                                     "mountain_name": ""})
+    # 動画が無くても（写真だけでも）作れる
+    _l2, photos_only = studio.build_argv("library", {"videos": []})
+    assert "pipeline/build_library.py" in photos_only
 
 
 def test_list_state_shape() -> None:
