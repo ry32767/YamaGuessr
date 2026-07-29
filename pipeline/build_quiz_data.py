@@ -120,7 +120,8 @@ def build_points(confirmed: dict[str, Any], images_dir: Optional[Path],
             if p.get(key) is not None:
                 point[key] = p[key]
 
-        if p.get("frame_time_s") is not None:
+        # 動画フレーム（frame_time_s）でも写真（photo_source）でも画像を伴う
+        if p.get("frame_time_s") is not None or p.get("photo_source"):
             filename = f"{p['id']}.webp"
             src = (images_dir / filename) if images_dir else None
             if src is None or not src.exists():

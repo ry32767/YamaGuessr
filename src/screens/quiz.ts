@@ -69,6 +69,14 @@ export function createQuizScreen(
       headingDeg: initialHeading(first),
       groundElevationM: first.elevation_m,
     });
+
+    // 「自分がどこに立っているか」を一発で確かめられるようにする
+    const view = terrain;
+    const down = el('button', { class: 'terrain-btn', type: 'button' }, '真下を見る');
+    const ahead = el('button', { class: 'terrain-btn', type: 'button' }, '水平に戻す');
+    down.addEventListener('click', () => view.lookDown());
+    ahead.addEventListener('click', () => view.lookAhead());
+    append(terrainHost, el('div', { class: 'terrain-controls' }, down, ahead));
   }
 
   const photo = el('img', {

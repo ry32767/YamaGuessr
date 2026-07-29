@@ -324,6 +324,35 @@
   color: var(--c-slate);
 }
 
+/* 3Dビューの向きを一発で変えるボタン。地図を覆う面積は最小に保つ */
+/* 出典表示（右下）に重ねないよう左下に置く。出典を隠さないのは不変条件 */
+.terrain-controls {
+  position: absolute;
+  left: var(--s-2);
+  bottom: var(--s-2);
+  z-index: 3;
+  display: flex;
+  gap: var(--s-1);
+}
+
+.terrain-btn {
+  min-height: var(--tap);
+  padding: var(--s-1) var(--s-3);
+  border: var(--border);
+  border-radius: var(--r-full);
+  background: rgba(16, 22, 31, 0.82);
+  color: var(--c-snow);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.terrain-btn:hover {
+  background: var(--c-mist);
+}
+
 .quiz__answer {
   position: relative;
   min-height: 0;

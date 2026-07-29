@@ -57,6 +57,13 @@
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
   a { color: var(--accent); }
+  .uploads { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+  .drop {
+    display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center;
+    margin: 0; padding: 14px 10px; text-align: center; cursor: pointer;
+    border: 1px dashed var(--line); border-radius: 8px; background: #0e1218; color: var(--text);
+  }
+  .drop:hover { border-color: var(--accent); background: #141a22; }
 </style>
 </head>
 <body>
@@ -70,18 +77,41 @@
 <main>
   <section>
     <div class="card">
+      <h2>素材を追加</h2>
+      <div class="uploads">
+        <label class="drop">
+          <input type="file" id="upGpx" accept=".gpx" multiple hidden>
+          <b>GPXを追加</b><span class="tiny muted">ヤマレコ／YAMAPの書き出し</span>
+        </label>
+        <label class="drop">
+          <input type="file" id="upPhoto" accept="image/*" multiple hidden>
+          <b>写真を追加</b><span class="tiny muted">スマホの写真（JPEG）</span>
+        </label>
+        <label class="drop">
+          <input type="file" id="upVideo" accept="video/*" multiple hidden>
+          <b>動画を追加</b><span class="tiny muted">DJIのMP4</span>
+        </label>
+      </div>
+      <div id="upStatus" class="tiny muted" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
       <h2>素材</h2>
       <div id="materials" class="tiny muted">読み込み中…</div>
       <label for="gpx">GPX（ルート）</label>
       <select id="gpx"></select>
       <label>動画（複数選べます。無ければ3D専用の出題になります）</label>
       <div class="checks" id="videos"></div>
+      <label>写真</label>
+      <div id="photos" class="tiny muted">—</div>
       <label for="mountainId">山ID（英数字とハイフン。例: odaigahara-2026-06-11）</label>
       <input type="text" id="mountainId" placeholder="odaigahara-2026-06-11">
       <label for="mountainName">山名（画面に出る名前）</label>
       <input type="text" id="mountainName" placeholder="大台ヶ原・日出ヶ岳">
-      <label for="offset">動画とGPXの時計ずれ補正 [秒]（分からなければ0）</label>
+      <label for="offset">カメラとGPXの時計ずれ補正 [秒]（分からなければ0）</label>
       <input type="number" id="offset" value="0" step="1">
+      <label for="tz">写真の撮影時刻のタイムゾーン（EXIFに入っていればそちらが優先）</label>
+      <input type="text" id="tz" value="+09:00">
     </div>
 
     <div class="card">
@@ -111,6 +141,7 @@
 'use strict';
 
 const STEPS = [
+  { key: 'photos', name: '写真の取り込み', desc: 'EXIFの撮影時刻をGPXに突き合わせて位置を決め、出題地点にする' },
   { key: 'telemetry', name: 'テレメトリ抽出', desc: '動画からGPS・姿勢・撮影時刻を取り出す（動画1本ずつ）' },
   { key: 'match', name: 'GPX照合', desc: 'テレメトリをGPXに突き合わせて track.json を作る' },
   { key: 'detect', name: '候補検出', desc: '地形から出題候補を探す。動画が無ければGPXだけでも可' },
@@ -147,6 +178,13 @@ function renderMaterials() {
         <label><input type="checkbox" value="${v.path}">
         ${v.name} <span class="muted tiny">${v.size_mb} MB</span></label>`).join('')
     : '<span class="muted tiny">動画がありません（3D専用の出題データなら作れます）</span>';
+
+  const photoNote = s.unsupported_photos.length
+    ? ` <span class="ng">HEIC ${s.unsupported_photos.length}件は読めません（JPEGに変換してください）</span>`
+    : '';
+  $('photos').innerHTML = s.photos.length
+    ? `Source/photos/ に ${s.photos.length}枚` + photoNote
+    : `写真がありません。上の「写真を追加」から入れてください。${photoNote}`;
 
   $('mountains').innerHTML = s.mountains.length
     ? `<table><tr><th>山</th><th>地点</th><th>max_distance</th><th>ルート</th></tr>` +
@@ -191,6 +229,7 @@ async function run(step, button) {
     mountain_id: $('mountainId').value,
     mountain_name: $('mountainName').value,
     time_offset_s: Number($('offset').value) || 0,
+    tz: $('tz').value,
     use_track: state && state.intermediate.track,
   };
   button.disabled = true;
@@ -239,6 +278,37 @@ async function loadState() {
     if (keepVideos.has(i.value)) i.checked = true;
   });
 }
+
+// --- アップロード -----------------------------------------------------------
+async function upload(kind, files) {
+  const status = $('upStatus');
+  let done = 0;
+  const failed = [];
+  for (const file of files) {
+    status.textContent = `${file.name} を送っています（${done + 1}/${files.length}）…`;
+    try {
+      const res = await fetch(
+        `/api/upload?kind=${kind}&name=${encodeURIComponent(file.name)}`,
+        { method: 'POST', body: file },
+      );
+      const data = await res.json();
+      if (!res.ok) failed.push(`${file.name}: ${data.error}`);
+      else done += 1;
+    } catch (e) {
+      failed.push(`${file.name}: ${String(e).slice(0, 60)}`);
+    }
+  }
+  status.innerHTML = `<span class="ok">${done}件を追加しました。</span>` +
+    (failed.length ? ` <span class="ng">${failed.join(' / ')}</span>` : '');
+  await loadState();
+}
+
+[['upGpx', 'gpx'], ['upPhoto', 'photo'], ['upVideo', 'video']].forEach(([id, kind]) => {
+  $(id).addEventListener('change', (e) => {
+    if (e.target.files.length) upload(kind, [...e.target.files]);
+    e.target.value = '';
+  });
+});
 
 $('reload').onclick = loadState;
 renderSteps();

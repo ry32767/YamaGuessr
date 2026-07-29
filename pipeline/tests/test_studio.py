@@ -157,11 +157,79 @@ def test_build_argv_adopt_all_passes_mountain() -> None:
     assert "大台ヶ原" in argv
 
 
+def test_build_argv_photos_needs_gpx_and_mountain() -> None:
+    _l, argv = studio.build_argv("photos", {
+        "gpx": "Source/r.gpx", "mountain_id": "m", "mountain_name": "山",
+        "tz": "+09:00", "time_offset_s": 30,
+    })
+    assert "pipeline/import_photos.py" in argv
+    assert "Source/photos" in argv
+    assert "--tz" in argv and "+09:00" in argv
+    assert "--time-offset-s" in argv and "30" in argv
+
+    with pytest.raises(ValueError):
+        studio.build_argv("photos", {"gpx": "", "mountain_id": "m", "mountain_name": "山"})
+    with pytest.raises(ValueError):
+        studio.build_argv("photos", {"gpx": "Source/r.gpx", "mountain_id": "",
+                                     "mountain_name": ""})
+
+
 def test_list_state_shape() -> None:
     state = studio.list_state()
-    assert set(state) >= {"videos", "gpx", "mountains", "intermediate", "source_dir_exists"}
+    assert set(state) >= {"videos", "gpx", "photos", "unsupported_photos",
+                          "mountains", "intermediate", "source_dir_exists"}
     assert isinstance(state["videos"], list)
     assert isinstance(state["mountains"], list)
+    assert isinstance(state["photos"], list)
+
+
+# ---------------------------------------------------------------------------
+# アップロード
+# ---------------------------------------------------------------------------
+def test_safe_filename_strips_paths() -> None:
+    assert studio.safe_filename("../../etc/passwd") == "passwd"
+    assert studio.safe_filename("C:\\Users\\me\\IMG_0001.JPG") == "IMG_0001.JPG"
+    assert studio.safe_filename("") == "upload"
+    # 日本語のファイル名はそのまま残す（スマホから来る名前を壊さない）
+    assert studio.safe_filename("写真 (1).jpg") == "写真 (1).jpg"
+    # 区切り文字や制御文字は落とす
+    assert "/" not in studio.safe_filename("a/b.jpg")
+    assert ":" not in studio.safe_filename("a:b.jpg")
+
+
+def test_save_upload_rejects_unknown_kind_and_suffix(monkeypatch: pytest.MonkeyPatch,
+                                                     tmp_path: Path) -> None:
+    monkeypatch.setattr(studio, "UPLOAD_KINDS", {
+        "photo": (tmp_path / "photos", {".jpg"}),
+    })
+    with pytest.raises(ValueError):
+        studio.save_upload("script", "evil.py", b"x")
+    with pytest.raises(ValueError):
+        studio.save_upload("photo", "evil.exe", b"x")
+
+
+def test_save_upload_writes_and_avoids_overwrite(monkeypatch: pytest.MonkeyPatch,
+                                                 tmp_path: Path) -> None:
+    photos = tmp_path / "photos"
+    monkeypatch.setattr(studio, "UPLOAD_KINDS", {"photo": (photos, {".jpg"})})
+    monkeypatch.setattr(studio, "ROOT", tmp_path)
+
+    first = studio.save_upload("photo", "IMG_0001.jpg", b"aaa")
+    second = studio.save_upload("photo", "IMG_0001.jpg", b"bbb")
+    assert first["name"] == "IMG_0001.jpg"
+    assert second["name"] == "IMG_0001-2.jpg"      # 上書きしない
+    assert (photos / "IMG_0001.jpg").read_bytes() == b"aaa"
+    assert (photos / "IMG_0001-2.jpg").read_bytes() == b"bbb"
+
+
+def test_save_upload_cannot_escape_the_directory(monkeypatch: pytest.MonkeyPatch,
+                                                 tmp_path: Path) -> None:
+    photos = tmp_path / "photos"
+    monkeypatch.setattr(studio, "UPLOAD_KINDS", {"photo": (photos, {".jpg"})})
+    monkeypatch.setattr(studio, "ROOT", tmp_path)
+    info = studio.save_upload("photo", "../../../evil.jpg", b"x")
+    assert (photos / "evil.jpg").exists()
+    assert ".." not in info["path"]
 
 
 def test_all_steps_are_buildable_or_reject_cleanly() -> None:

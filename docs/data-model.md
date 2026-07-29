@@ -83,7 +83,7 @@ erDiagram
 | `Mountain.scoring_k` | スコア減衰の急峻さ係数（既定4、大きいほど厳しい） |
 | `Mountain.track_path` | 地形図に描くGPXトラック（GeoJSON LineString）のパス。山ごとの別ファイルで、遊ぶ山のぶんだけ読み込む。GPX無しで作った山では省略 |
 | `Point.lat/lon` | **GPXルート上にスナップ済みの座標**（生GPSではない。理由は[spec.md](spec.md)の設計判断表） |
-| `Point.type` | `bend`(ルート屈曲) / `ridge_view`(尾根谷が見える) / `ridge_start`(尾根に乗り始め) / `peak` / `col` / `manual`(手動追加) |
+| `Point.type` | `bend`(ルート屈曲) / `ridge_view`(尾根谷が見える) / `ridge_start`(尾根に乗り始め) / `peak` / `col` / `manual`(手動追加) / `photo`(写真1枚から作った地点) |
 | `Point.elevation_m` | 地理院DEM由来の標高。**3Dビューで視点をこの高さに置く**ためにフロントへ渡す（タイル読み込みを待たずに正しい視点を作れる） |
 | `Point.image_path` | **任意**。省略された地点は画像を持たず、**モード②（3D地形）専用**として出題する（[spec.md](spec.md)の設計判断表） |
 | `Point.media_id` | 画像の出所メディア（分割動画・後から足した素材の識別）。画像が無い地点では省略 |

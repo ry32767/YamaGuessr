@@ -30,14 +30,28 @@ from typing import Any, Optional
 ROOT = Path(__file__).resolve().parent.parent
 PIPELINE = ROOT / "pipeline"
 SOURCE_DIR = ROOT / "Source"
+PHOTOS_DIR = SOURCE_DIR / "photos"
 DATA_DIR = PIPELINE / "data"
 PUBLIC_DIR = ROOT / "public"
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".MP4", ".MOV"}
 GPX_SUFFIXES = {".gpx", ".GPX"}
+PHOTO_SUFFIXES = {".jpg", ".jpeg", ".JPG", ".JPEG", ".tif", ".tiff", ".TIF", ".TIFF"}
+#: 読めないが、スマホからよく来る形式（案内を出すため受け取りはする）
+PHOTO_UNSUPPORTED = {".heic", ".HEIC", ".heif", ".HEIF"}
+
+#: アップロードを受け付ける種別と置き場
+UPLOAD_KINDS: dict[str, tuple[Path, set[str]]] = {
+    "gpx": (SOURCE_DIR, GPX_SUFFIXES),
+    "video": (SOURCE_DIR, VIDEO_SUFFIXES),
+    "photo": (PHOTOS_DIR, PHOTO_SUFFIXES | PHOTO_UNSUPPORTED),
+}
+#: 1ファイルの上限。長時間の動画も置けるように大きめ
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
 
 #: 画面から実行できる工程。argv は studio.html 側の入力から組み立てる
-STEPS = ("telemetry", "match", "detect", "previews", "frames", "build", "adopt_all")
+STEPS = ("telemetry", "match", "detect", "previews", "frames", "build",
+         "adopt_all", "photos")
 
 
 class Job:
@@ -103,10 +117,42 @@ class Job:
 # ---------------------------------------------------------------------------
 # 素材と現状の把握
 # ---------------------------------------------------------------------------
+def safe_filename(name: str) -> str:
+    """アップロードされた名前から、置き場所を壊しうる文字を落とす。"""
+    base = Path(name.replace("\\", "/")).name
+    cleaned = "".join(c for c in base if c.isalnum() or c in "._- ()").strip()
+    return cleaned or "upload"
+
+
+def save_upload(kind: str, name: str, data: bytes) -> dict[str, Any]:
+    """アップロードされたファイルを Source/ 配下に置く。"""
+    if kind not in UPLOAD_KINDS:
+        raise ValueError(f"受け付けない種別です: {kind}")
+    directory, suffixes = UPLOAD_KINDS[kind]
+    filename = safe_filename(name)
+    if Path(filename).suffix not in suffixes:
+        allowed = "・".join(sorted({s.lower() for s in suffixes}))
+        raise ValueError(f"{filename} は扱えません（{allowed} のいずれか）")
+    directory.mkdir(parents=True, exist_ok=True)
+    dest = directory / filename
+    # 同名があれば上書きせず連番を付ける（撮り直しを消さないため）
+    if dest.exists():
+        stem, suffix = dest.stem, dest.suffix
+        i = 2
+        while dest.exists():
+            dest = directory / f"{stem}-{i}{suffix}"
+            i += 1
+    dest.write_bytes(data)
+    return {"path": dest.relative_to(ROOT).as_posix(), "name": dest.name,
+            "size_mb": round(len(data) / 1024 / 1024, 2)}
+
+
 def list_state() -> dict[str, Any]:
     """Source/ の素材と、いま公開されている出題データの状況を返す。"""
     videos = []
     gpx_files = []
+    photos = []
+    unsupported_photos = []
     if SOURCE_DIR.exists():
         for path in sorted(SOURCE_DIR.iterdir()):
             if not path.is_file():
@@ -119,6 +165,14 @@ def list_state() -> dict[str, Any]:
                 videos.append(info)
             elif path.suffix in GPX_SUFFIXES:
                 gpx_files.append(info)
+    if PHOTOS_DIR.exists():
+        for path in sorted(PHOTOS_DIR.iterdir()):
+            if not path.is_file():
+                continue
+            if path.suffix in PHOTO_SUFFIXES:
+                photos.append(path.name)
+            elif path.suffix in PHOTO_UNSUPPORTED:
+                unsupported_photos.append(path.name)
 
     mountains: list[dict[str, Any]] = []
     quiz_path = PUBLIC_DIR / "data" / "quiz_points.json"
@@ -139,6 +193,8 @@ def list_state() -> dict[str, Any]:
     return {
         "videos": videos,
         "gpx": gpx_files,
+        "photos": photos,
+        "unsupported_photos": unsupported_photos,
         "mountains": mountains,
         "intermediate": {
             "telemetry": exists("pipeline/data/telemetry.json"),
@@ -220,6 +276,22 @@ def build_argv(step: str, params: dict[str, Any]) -> tuple[str, list[str]]:
             "--mountain-id", mountain_id, "--mountain-name", mountain_name,
             "--out", "pipeline/data/confirmed_points.json",
         ])
+
+    if step == "photos":
+        if not gpx:
+            raise ValueError("写真の位置はGPXから決めるので、GPXを選んでください")
+        if not mountain_id or not mountain_name:
+            raise ValueError("山IDと山名を入力してください")
+        argv = [py, "pipeline/import_photos.py", "--gpx", gpx,
+                "--photos-dir", "Source/photos",
+                "--mountain-id", mountain_id, "--mountain-name", mountain_name,
+                "--out", "pipeline/data/confirmed_points.json",
+                "--images-out", "pipeline/data/frames"]
+        if params.get("tz"):
+            argv += ["--tz", str(params["tz"])]
+        if params.get("time_offset_s"):
+            argv += ["--time-offset-s", str(params["time_offset_s"])]
+        return ("写真の取り込み", argv)
 
     if step == "frames":
         if not videos:
@@ -311,7 +383,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if not self._is_local():
             self.send_error(403, "localhost only")
             return
-        if urllib.parse.urlparse(self.path).path != "/api/run":
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/upload":
+            self._handle_upload(parsed)
+            return
+        if parsed.path != "/api/run":
             self.send_error(404)
             return
         length = int(self.headers.get("Content-Length") or 0)
@@ -331,6 +407,30 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return
         job = Job(label, argv).start()
         self._json({"id": job.id, "label": label})
+
+    def _handle_upload(self, parsed: urllib.parse.ParseResult) -> None:
+        """`?kind=photo&name=IMG_0001.jpg` ＋ 本体がそのままファイル、という形で受ける。
+
+        multipart を解く標準ライブラリ（cgi）が Python 3.13 で消えたので、
+        自前のUIからは生バイトで送る単純な形にしている。
+        """
+        query = urllib.parse.parse_qs(parsed.query)
+        kind = (query.get("kind") or [""])[0]
+        name = (query.get("name") or [""])[0]
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            self._json({"error": "中身が空です"}, 400)
+            return
+        if length > MAX_UPLOAD_BYTES:
+            self._json({"error": "ファイルが大きすぎます"}, 413)
+            return
+        data = self.rfile.read(length)
+        try:
+            info = save_upload(kind, name, data)
+        except (ValueError, OSError) as e:
+            self._json({"error": str(e)}, 400)
+            return
+        self._json(info)
 
 
 def main(argv: Optional[list[str]] = None) -> int:

@@ -10,7 +10,9 @@ export type PointType =
   | 'ridge_start'
   | 'peak'
   | 'col'
-  | 'manual';
+  | 'manual'
+  /** 写真1枚から作った地点（EXIFの撮影時刻をGPXに突き合わせて位置を決めたもの） */
+  | 'photo';
 
 /** 地点の出所 */
 export type PointSource = 'auto' | 'manual';

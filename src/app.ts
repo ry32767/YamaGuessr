@@ -68,6 +68,7 @@ const TYPE_LABELS: Record<string, string> = {
   ridge_start: '尾根に乗り始め',
   bend: '屈曲',
   manual: '手動追加',
+  photo: '写真',
 };
 
 class App {

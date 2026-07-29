@@ -169,6 +169,24 @@ python pipeline/adopt_candidates.py --candidates pipeline/data/candidates.json \
   --out pipeline/data/confirmed_points.json
 ```
 
+## 5b. `import_photos.py`（写真から地点を作る）
+
+スマホで撮った写真をそのまま出題地点にする。動画の工程（1〜5）とは独立していて、**GPXと写真だけあれば動く**。
+
+```bash
+python pipeline/import_photos.py --gpx Source/route.gpx \
+  --photos-dir Source/photos \
+  --mountain-id odaigahara-2026-06-11 --mountain-name "大台ヶ原・日出ヶ岳" \
+  --out pipeline/data/confirmed_points.json --images-out pipeline/data/frames
+```
+
+- 位置は **EXIFの撮影日時をGPXに突き合わせて** 決める。写真のGPSは使わない（GPXの方が精度も一貫性も高い。設計判断は[spec.md](spec.md)）
+- EXIFにUTCオフセットが無ければ`--tz`（既定 +09:00）を使う。カメラの時計がずれていれば`--time-offset-s`で補正する
+- GPXの時刻範囲から300秒以上外れた写真は**採用せず理由を出す**（別の山行の写真が紛れても違う場所の地点を作らない）
+- 画像は長辺1280pxのWebP・200KB以下・メタデータ全除去。ファイル名は`{point_id}.webp`
+- **HEIC/HEIFは読めない**。iPhoneの写真はJPEGに変換してから置く
+- EXIFの読み取りは`pipeline/exif.py`。撮影日時・UTCオフセット・GPS・向きだけを読む最小実装で、画像ライブラリには依存しない
+
 ## 6. `build_quiz_data.py`
 - `confirmed_points.json`をMountain/Point構造（[data-model.md](data-model.md)参照）に変換。**公開JSONに出すのはスナップ後座標のみ**（生GPS・snap_distance・品質スコアは中間ファイルに留める）
 - **GPXを許容誤差8mで間引き、`public/data/tracks/{mountain_id}.json`に書き出す**（地形図に重ねて描くルート。実績：425点→100点 / 2.6KB）。`Mountain.track_path`から参照する
