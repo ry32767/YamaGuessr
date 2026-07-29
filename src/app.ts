@@ -4,7 +4,7 @@
  * フレームワークは足さない（AGENTS.md）。画面は「作って差し替える」だけの単純な
  * 切り替えで、状態はこのモジュールが持つ。
  */
-import { QuizDataError, loadQuizData } from './data';
+import { QuizDataError, loadQuizData, playableCount } from './data';
 import { MAX_SCORE } from './scoring';
 import { CHALLENGE_COUNT, QuizSession, SessionError, describeEmpty } from './session';
 import { isSoundEnabled, toggleSound } from './sound';
@@ -76,6 +76,8 @@ class App {
   private data: QuizData | null = null;
   private mode: GameMode = 'challenge10';
   private viewMode: ViewMode = 'map2d';
+  /** 出題を絞る山（トラック）。null なら全部の山からまぜて出題する */
+  private mountainId: string | null = null;
   private session: QuizSession | null = null;
   private quiz: QuizScreen | null = null;
 
@@ -220,20 +222,19 @@ class App {
         this.showHome();
       }),
     );
+    append(home, this.trackGroup(data));
 
-    const playable = data.points.filter((p) =>
-      this.viewMode === 'map2d' ? Boolean(p.image_path) : true,
-    );
+    const playable = playableCount(data, this.viewMode, this.mountainId);
 
     const start = el(
       'button',
-      { class: 'btn btn--primary btn--block', type: 'button', disabled: playable.length === 0 },
-      'はじめる',
+      { class: 'btn btn--primary btn--block', type: 'button', disabled: playable === 0 },
+      playable > 0 ? `はじめる（${playable}地点から）` : 'はじめる',
     );
     start.addEventListener('click', () => this.startSession());
     append(home, start);
 
-    if (playable.length === 0) {
+    if (playable === 0) {
       append(home, el('p', { class: 'muted tiny' }, describeEmpty(this.viewMode)));
     }
 
@@ -292,6 +293,67 @@ class App {
     return group;
   }
 
+  /**
+   * どのトラック（山）から出題するかを選ぶ。
+   * 山が増えていくので、1山だけ遊ぶ／全部まぜる を選べるようにしてある。
+   */
+  private trackGroup(data: QuizData): HTMLElement {
+    const group = el('section', { class: 'stack' }, el('h2', {}, 'コース'));
+    const list = el('div', { class: 'tracks', role: 'group', 'aria-label': 'コース' });
+
+    const makeButton = (
+      id: string | null,
+      name: string,
+      detail: string,
+      count: number,
+    ): HTMLButtonElement => {
+      const selected = this.mountainId === id;
+      const button = el(
+        'button',
+        {
+          class: 'track',
+          type: 'button',
+          'aria-pressed': String(selected),
+          disabled: count === 0,
+        },
+        el('span', { class: 'track__name' }, name),
+        el('span', { class: 'track__detail' }, detail),
+        el('span', { class: 'track__count num' }, count === 0 ? '出題なし' : `${count}地点`),
+      );
+      button.addEventListener('click', () => {
+        this.mountainId = id;
+        this.showHome();
+      });
+      return button;
+    };
+
+    if (data.mountains.length > 1) {
+      append(
+        list,
+        makeButton(
+          null,
+          'すべてのコース',
+          `${data.mountains.length}コースからまぜて出題`,
+          playableCount(data, this.viewMode, null),
+        ),
+      );
+    }
+    for (const mountain of [...data.mountains].sort((a, b) => a.id.localeCompare(b.id))) {
+      const count = playableCount(data, this.viewMode, mountain.id);
+      append(
+        list,
+        makeButton(
+          mountain.id,
+          mountain.name,
+          mountain.track_path ? 'ルートを地形図に表示' : 'ルート未登録',
+          count,
+        ),
+      );
+    }
+    append(group, list);
+    return group;
+  }
+
   private resumeCard(progress: Progress, data: QuizData): HTMLElement {
     const stale = progress.datasetVersion !== data.dataset_version;
     const card = el(
@@ -335,10 +397,11 @@ class App {
     const data = this.data;
     if (!data) return;
     try {
+      const options = { mountainId: this.mountainId };
       this.session =
         this.mode === 'challenge10'
-          ? QuizSession.challenge(data, this.viewMode)
-          : QuizSession.completeAll(data, this.viewMode);
+          ? QuizSession.challenge(data, this.viewMode, options)
+          : QuizSession.completeAll(data, this.viewMode, options);
     } catch (error) {
       toast(error instanceof SessionError ? error.message : '出題を開始できませんでした', 'error');
       return;

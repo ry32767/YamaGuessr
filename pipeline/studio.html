@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YamaGuessr Studio（ローカル専用）</title>
+<style>
+  :root {
+    --bg: #12161c; --panel: #1b212a; --line: #2c3542; --text: #e6ebf2;
+    --muted: #8d99a8; --accent: #e8a33d; --ok: #45c17a; --ng: #d9534f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-size: 14px;
+    font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    line-height: 1.6;
+  }
+  header {
+    padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  h1 { font-size: 16px; margin: 0; }
+  h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); letter-spacing: .06em; }
+  .local { color: var(--accent); font-size: 12px; }
+  main { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+  label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 13px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px;
+    background: #0e1218; color: var(--text); font: inherit;
+  }
+  .checks { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow: auto;
+            border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #0e1218; }
+  .checks label { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); }
+  button {
+    background: #263041; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 9px 12px; font: inherit; cursor: pointer; min-height: 38px;
+  }
+  button:hover:not(:disabled) { background: #2f3b4f; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #10161f; font-weight: 700; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .steps { display: flex; flex-direction: column; gap: 8px; }
+  .step { display: grid; grid-template-columns: 1.6rem 1fr auto; gap: 10px; align-items: center; }
+  .step .n { color: var(--muted); font-family: ui-monospace, monospace; }
+  .step .desc { font-size: 12px; color: var(--muted); }
+  .step b { display: block; font-size: 13px; color: var(--text); }
+  pre {
+    background: #0a0d12; border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; margin: 0; height: 460px; overflow: auto; white-space: pre-wrap;
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 12px;
+  }
+  .muted { color: var(--muted); }
+  .tiny { font-size: 12px; }
+  .ok { color: var(--ok); }
+  .ng { color: var(--ng); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>YamaGuessr Studio</h1>
+  <span class="local">ローカル専用（127.0.0.1）／このツールは公開されません</span>
+  <span style="flex:1"></span>
+  <button id="reload">素材を読み直す</button>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <h2>素材</h2>
+      <div id="materials" class="tiny muted">読み込み中…</div>
+      <label for="gpx">GPX（ルート）</label>
+      <select id="gpx"></select>
+      <label>動画（複数選べます。無ければ3D専用の出題になります）</label>
+      <div class="checks" id="videos"></div>
+      <label for="mountainId">山ID（英数字とハイフン。例: odaigahara-2026-06-11）</label>
+      <input type="text" id="mountainId" placeholder="odaigahara-2026-06-11">
+      <label for="mountainName">山名（画面に出る名前）</label>
+      <input type="text" id="mountainName" placeholder="大台ヶ原・日出ヶ岳">
+      <label for="offset">動画とGPXの時計ずれ補正 [秒]（分からなければ0）</label>
+      <input type="number" id="offset" value="0" step="1">
+    </div>
+
+    <div class="card">
+      <h2>工程</h2>
+      <div class="steps" id="steps"></div>
+      <p class="tiny muted" style="margin-top:12px">
+        動画がある場合は 1→2→3→4→レビュー→6→7 の順に。<br>
+        動画が無い場合は 3（GPXのみ）→5→7 でも出題データを作れます（3D専用地点）。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>いま公開されている出題データ</h2>
+      <div id="mountains" class="tiny muted">—</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>実行ログ</h2>
+      <pre id="log">まだ何も実行していません。</pre>
+    </div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+const STEPS = [
+  { key: 'telemetry', name: 'テレメトリ抽出', desc: '動画からGPS・姿勢・撮影時刻を取り出す（動画1本ずつ）' },
+  { key: 'match', name: 'GPX照合', desc: 'テレメトリをGPXに突き合わせて track.json を作る' },
+  { key: 'detect', name: '候補検出', desc: '地形から出題候補を探す。動画が無ければGPXだけでも可' },
+  { key: 'previews', name: 'レビュー用プレビュー', desc: '切り出し時刻を選ぶための小さな画像を作る' },
+  { key: 'review', name: 'レビュー（別画面）', desc: '候補の採否と切り出し時刻を決めて confirmed_points.json を保存' },
+  { key: 'adopt_all', name: '候補を全採用', desc: 'レビューを省いて一気に確定させる近道' },
+  { key: 'frames', name: '本番画像の切り出し', desc: '確定時刻から出題用のWebPを作る' },
+  { key: 'build', name: '出題データ生成', desc: 'public/data/quiz_points.json とトラックを書き出す' },
+];
+
+const $ = (id) => document.getElementById(id);
+let state = null;
+
+function selectedVideos() {
+  return [...document.querySelectorAll('#videos input:checked')].map((i) => i.value);
+}
+
+function renderMaterials() {
+  const s = state;
+  if (!s.source_dir_exists) {
+    $('materials').innerHTML =
+      '<span class="ng">Source/ がありません。</span> リポジトリ直下に Source/ を作り、GPXと動画を置いてください。';
+  } else {
+    $('materials').textContent =
+      `Source/ に GPX ${s.gpx.length}件、動画 ${s.videos.length}件`;
+  }
+
+  $('gpx').innerHTML = s.gpx.length
+    ? s.gpx.map((g) => `<option value="${g.path}">${g.name}</option>`).join('')
+    : '<option value="">（GPXがありません）</option>';
+
+  $('videos').innerHTML = s.videos.length
+    ? s.videos.map((v) => `
+        <label><input type="checkbox" value="${v.path}">
+        ${v.name} <span class="muted tiny">${v.size_mb} MB</span></label>`).join('')
+    : '<span class="muted tiny">動画がありません（3D専用の出題データなら作れます）</span>';
+
+  $('mountains').innerHTML = s.mountains.length
+    ? `<table><tr><th>山</th><th>地点</th><th>max_distance</th><th>ルート</th></tr>` +
+      s.mountains.map((m) => `<tr><td>${m.name}<br><span class="muted tiny">${m.id}</span></td>
+        <td>${m.point_count}</td><td>${m.max_distance_m} m</td>
+        <td>${m.track_path ? 'あり' : '—'}</td></tr>`).join('') + '</table>'
+    : 'まだ出題データがありません。';
+
+  const i = s.intermediate;
+  const mark = (ok) => ok ? '<span class="ok">あり</span>' : '<span class="muted">なし</span>';
+  $('materials').innerHTML += `<div style="margin-top:6px">中間データ:
+    track ${mark(i.track)} / candidates ${mark(i.candidates)} /
+    previews ${mark(i.previews)} / confirmed ${mark(i.confirmed)} / frames ${mark(i.frames)}</div>`;
+}
+
+function renderSteps() {
+  $('steps').innerHTML = '';
+  STEPS.forEach((step, index) => {
+    const row = document.createElement('div');
+    row.className = 'step';
+    row.innerHTML = `<span class="n">${index + 1}</span>
+      <span><b>${step.name}</b><span class="desc">${step.desc}</span></span>`;
+    const button = document.createElement('button');
+    if (step.key === 'review') {
+      button.textContent = '開く';
+      button.onclick = () => window.open('/pipeline/review.html', '_blank');
+    } else {
+      button.textContent = '実行';
+      if (step.key === 'build') button.className = 'primary';
+      button.onclick = () => run(step.key, button);
+    }
+    row.appendChild(button);
+    $('steps').appendChild(row);
+  });
+}
+
+async function run(step, button) {
+  const body = {
+    step,
+    gpx: $('gpx').value,
+    videos: selectedVideos(),
+    mountain_id: $('mountainId').value,
+    mountain_name: $('mountainName').value,
+    time_offset_s: Number($('offset').value) || 0,
+    use_track: state && state.intermediate.track,
+  };
+  button.disabled = true;
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      $('log').textContent = `エラー: ${data.error}`;
+      return;
+    }
+    await follow(data.id);
+  } finally {
+    button.disabled = false;
+    await loadState();
+  }
+}
+
+async function follow(jobId) {
+  const log = $('log');
+  log.textContent = '';
+  let offset = 0;
+  for (;;) {
+    const res = await fetch(`/api/log?id=${jobId}&offset=${offset}`);
+    const data = await res.json();
+    if (data.lines && data.lines.length) {
+      log.textContent += data.lines.join('\n') + '\n';
+      log.scrollTop = log.scrollHeight;
+    }
+    offset = data.next;
+    if (data.done) return;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
+async function loadState() {
+  state = await (await fetch('/api/state')).json();
+  const keepGpx = $('gpx').value;
+  const keepVideos = new Set(selectedVideos());
+  renderMaterials();
+  if (keepGpx) $('gpx').value = keepGpx;
+  document.querySelectorAll('#videos input').forEach((i) => {
+    if (keepVideos.has(i.value)) i.checked = true;
+  });
+}
+
+$('reload').onclick = loadState;
+renderSteps();
+loadState();
+</script>
+</body>
+</html>

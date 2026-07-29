@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CHALLENGE_COUNT, QuizSession, SessionError } from './session';
-import { mountainView } from './data';
+import { mountainView, playableCount } from './data';
 import type { QuizData, QuizPoint } from './types';
 
 const MOUNTAIN = {
@@ -41,7 +41,7 @@ function seeded(seed: number): () => number {
 
 describe('QuizSession.challenge（機能H）', () => {
   it('ランダムに重複なく10問出す', () => {
-    const session = QuizSession.challenge(makeData(30), 'map2d', seeded(1));
+    const session = QuizSession.challenge(makeData(30), 'map2d', { random: seeded(1) });
     expect(session.total).toBe(CHALLENGE_COUNT);
     const ids = new Set<string>();
     for (let i = 0; i < session.total; i += 1) ids.add(session.pointAt(i)!.id);
@@ -49,12 +49,12 @@ describe('QuizSession.challenge（機能H）', () => {
   });
 
   it('総数が10未満なら全問出す', () => {
-    expect(QuizSession.challenge(makeData(4), 'map2d', seeded(2)).total).toBe(4);
+    expect(QuizSession.challenge(makeData(4), 'map2d', { random: seeded(2) }).total).toBe(4);
   });
 
   it('乱数が変われば出題も変わる', () => {
-    const a = QuizSession.challenge(makeData(50), 'map2d', seeded(1));
-    const b = QuizSession.challenge(makeData(50), 'map2d', seeded(999));
+    const a = QuizSession.challenge(makeData(50), 'map2d', { random: seeded(1) });
+    const b = QuizSession.challenge(makeData(50), 'map2d', { random: seeded(999) });
     const idsA = Array.from({ length: a.total }, (_, i) => a.pointAt(i)!.id);
     const idsB = Array.from({ length: b.total }, (_, i) => b.pointAt(i)!.id);
     expect(idsA).not.toEqual(idsB);
@@ -85,7 +85,7 @@ describe('出題対象の絞り込み（3D専用地点）', () => {
 
 describe('採点と進行', () => {
   it('ぴったり当てると満点、外すと減る', () => {
-    const session = QuizSession.challenge(makeData(3), 'map2d', seeded(3));
+    const session = QuizSession.challenge(makeData(3), 'map2d', { random: seeded(3) });
     const p = session.current()!;
     const perfect = session.submit({ lat: p.lat, lon: p.lon });
     expect(perfect.points).toBe(5000);
@@ -99,7 +99,7 @@ describe('採点と進行', () => {
   });
 
   it('合計点と達成率を出す', () => {
-    const session = QuizSession.challenge(makeData(2), 'map2d', seeded(4));
+    const session = QuizSession.challenge(makeData(2), 'map2d', { random: seeded(4) });
     const a = session.current()!;
     session.submit({ lat: a.lat, lon: a.lon });
     session.advance();
@@ -110,7 +110,7 @@ describe('採点と進行', () => {
   });
 
   it('最後の問題を終えると finished になる', () => {
-    const session = QuizSession.challenge(makeData(2), 'map2d', seeded(5));
+    const session = QuizSession.challenge(makeData(2), 'map2d', { random: seeded(5) });
     session.submit({ lat: 0, lon: 0 });
     expect(session.advance()).toBe(true);
     session.submit({ lat: 0, lon: 0 });
@@ -120,7 +120,7 @@ describe('採点と進行', () => {
   });
 
   it('終わった後に回答しようとすると例外', () => {
-    const session = QuizSession.challenge(makeData(1), 'map2d', seeded(6));
+    const session = QuizSession.challenge(makeData(1), 'map2d', { random: seeded(6) });
     session.submit({ lat: 0, lon: 0 });
     session.advance();
     expect(() => session.submit({ lat: 0, lon: 0 })).toThrow(SessionError);
@@ -167,6 +167,55 @@ describe('全地点制覇と進捗の保存・再開（機能I）', () => {
     const progress = QuizSession.completeAll(data, 'map2d').toProgress();
     const shrunk = makeData(2);
     expect(QuizSession.resume(shrunk, progress)).toBeNull();
+  });
+});
+
+describe('コース（山）の絞り込み', () => {
+  function multiMountain(): QuizData {
+    const other = { ...MOUNTAIN, id: 'kongo-2026-08-01', name: '金剛山' };
+    return {
+      dataset_version: '2026-07-29T00:00:00Z',
+      mountains: [MOUNTAIN, other],
+      points: [
+        ...Array.from({ length: 4 }, (_, i) => point(i + 1)),
+        ...Array.from({ length: 6 }, (_, i) => ({
+          ...point(i + 1),
+          id: `kongo-2026-08-01-${i + 1}`,
+          mountain_id: other.id,
+        })),
+      ],
+    };
+  }
+
+  it('山を指定するとその山の地点だけ出題する', () => {
+    const data = multiMountain();
+    const session = QuizSession.completeAll(data, 'terrain3d', {
+      mountainId: 'kongo-2026-08-01',
+    });
+    expect(session.total).toBe(6);
+    for (let i = 0; i < session.total; i += 1) {
+      expect(session.pointAt(i)!.mountain_id).toBe('kongo-2026-08-01');
+    }
+  });
+
+  it('未指定なら全部の山からまぜて出題する', () => {
+    expect(QuizSession.completeAll(multiMountain(), 'terrain3d').total).toBe(10);
+  });
+
+  it('10問チャレンジでも絞り込みが効く', () => {
+    const session = QuizSession.challenge(multiMountain(), 'terrain3d', {
+      mountainId: MOUNTAIN.id,
+      random: seeded(7),
+    });
+    expect(session.total).toBe(4);
+  });
+
+  it('playableCount がビューと山の組み合わせで数える', () => {
+    const data = multiMountain();
+    expect(playableCount(data, 'terrain3d', null)).toBe(10);
+    expect(playableCount(data, 'terrain3d', MOUNTAIN.id)).toBe(4);
+    expect(playableCount(data, 'map2d', 'kongo-2026-08-01')).toBe(6);
+    expect(playableCount(data, 'terrain3d', 'unknown')).toBe(0);
   });
 });
 

@@ -45,12 +45,22 @@ export function baseMapStyle(kind: BaseMapKind = 'std'): StyleSpecification {
   };
 }
 
+/** 3D地形の起伏の強調度。`map.setTerrain` に渡す */
+export const TERRAIN_EXAGGERATION = 1.2;
+
+/** 3D地形の標高ソースID */
+export const TERRAIN_SOURCE = 'dem';
+
 /**
  * モード②の3D地形スタイル。
  *
  * **地形図タイルをテクスチャとして貼らない。** 地形図には山名・三角点・注記が
  * 焼き込まれており、答えが画面に出てしまう（docs/spec.md 設計判断表）。
  * 描くのは陰影起伏（hillshade）と単色の地色だけ。
+ *
+ * `terrain` はスタイルに書かず、読み込み完了後に `map.setTerrain` で入れる。
+ * スタイル定義に混ぜると、読み込みの途中でカメラを動かしたときに
+ * 地形が有効にならないことがあったため。
  */
 export function terrainStyle(): StyleSpecification {
   return {
@@ -79,7 +89,6 @@ export function terrainStyle(): StyleSpecification {
         },
       },
     ],
-    terrain: { source: 'dem', exaggeration: 1.2 },
     sky: {
       'sky-color': '#5a7ea8',
       'horizon-color': '#9db4c8',
@@ -111,13 +120,18 @@ export function registerGsiDemProtocol(): void {
     const url = params.url.replace(`${GSI_DEM_PROTOCOL}://`, '');
     const res = await fetch(url);
     if (!res.ok) {
-      // 整備範囲外のタイルは 404。透明タイルを返して地形を平坦に扱う
-      if (res.status === 404) return { data: transparentTile() };
+      // 整備範囲外のタイルは 404。標高0mのタイルを返して平坦に扱う
+      if (res.status === 404) return { data: await flatTile() };
       throw new Error(`標高タイルを取得できませんでした: ${res.status}`);
     }
     const blob = await res.blob();
-    const bitmap = await createImageBitmap(blob);
-    return { data: toTerrainRgb(bitmap) };
+    // 標高は画素値そのものなので、色変換やアルファの事前乗算が入ると値が壊れる。
+    // 明示的に切っておかないと、地形が階段状・縞状に破綻する。
+    const bitmap = await createImageBitmap(blob, {
+      premultiplyAlpha: 'none',
+      colorSpaceConversion: 'none',
+    });
+    return { data: await toTerrainRgb(bitmap) };
   });
 }
 
@@ -129,10 +143,10 @@ function makeCanvas(width: number, height: number): OffscreenCanvas | HTMLCanvas
   return canvas;
 }
 
-function toTerrainRgb(bitmap: ImageBitmap): ArrayBuffer {
+async function toTerrainRgb(bitmap: ImageBitmap): Promise<ArrayBuffer> {
   const { width, height } = bitmap;
   const canvas = makeCanvas(width, height);
-  const ctx = canvas.getContext('2d') as
+  const ctx = canvas.getContext('2d', { willReadFrequently: true }) as
     | OffscreenCanvasRenderingContext2D
     | CanvasRenderingContext2D
     | null;
@@ -160,43 +174,49 @@ function toTerrainRgb(bitmap: ImageBitmap): ArrayBuffer {
   return encodePng(canvas);
 }
 
-function encodePng(canvas: OffscreenCanvas | HTMLCanvasElement): ArrayBuffer {
-  // 同期的に ArrayBuffer が必要なので dataURL 経由で取り出す
-  const dataUrl =
-    canvas instanceof HTMLCanvasElement
-      ? canvas.toDataURL('image/png')
-      : offscreenToDataUrl(canvas);
-  const binary = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
+/**
+ * canvas を PNG のバイト列にする。
+ *
+ * **canvas から canvas へ描き写してはいけない。** 標高は画素値そのものなので、
+ * drawImage を挟むと色管理で値がずれ、地形が壊れる。
+ * `convertToBlob` / `toBlob` で直接取り出す。
+ */
+function encodePng(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<ArrayBuffer> {
+  if (typeof OffscreenCanvas !== 'undefined' && canvas instanceof OffscreenCanvas) {
+    return canvas.convertToBlob({ type: 'image/png' }).then((blob) => blob.arrayBuffer());
+  }
+  const element = canvas as HTMLCanvasElement;
+  return new Promise((resolve, reject) => {
+    element.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('標高タイルをPNGに変換できませんでした'));
+        return;
+      }
+      resolve(blob.arrayBuffer());
+    }, 'image/png');
+  });
 }
 
-function offscreenToDataUrl(canvas: OffscreenCanvas): string {
-  // OffscreenCanvas には toDataURL が無いので、一度 HTMLCanvasElement に写す
-  const fallback = document.createElement('canvas');
-  fallback.width = canvas.width;
-  fallback.height = canvas.height;
-  const ctx = fallback.getContext('2d');
-  if (!ctx) throw new Error('canvas 2d コンテキストを作れませんでした');
-  ctx.drawImage(canvas as unknown as CanvasImageSource, 0, 0);
-  return fallback.toDataURL('image/png');
-}
+let cachedFlat: ArrayBuffer | null = null;
 
-let cachedTransparent: ArrayBuffer | null = null;
-
-function transparentTile(): ArrayBuffer {
-  if (cachedTransparent) return cachedTransparent;
+/** 標高0mのタイル。整備範囲外（404）で使う。 */
+async function flatTile(): Promise<ArrayBuffer> {
+  if (cachedFlat) return cachedFlat;
   const canvas = makeCanvas(256, 256);
-  const ctx = canvas.getContext('2d') as
+  const ctx = canvas.getContext('2d', { willReadFrequently: true }) as
     | OffscreenCanvasRenderingContext2D
     | CanvasRenderingContext2D
     | null;
   if (!ctx) throw new Error('canvas 2d コンテキストを作れませんでした');
-  // 標高 0m を表す terrain-RGB
-  const v = Math.round(10000 * 10);
-  ctx.fillStyle = `rgb(${(v >> 16) & 0xff}, ${(v >> 8) & 0xff}, ${v & 0xff})`;
-  ctx.fillRect(0, 0, 256, 256);
-  cachedTransparent = encodePng(canvas);
-  return cachedTransparent;
+  const v = Math.round(10000 * 10); // 標高 0m を表す terrain-RGB
+  const image = ctx.createImageData(256, 256);
+  for (let i = 0; i < image.data.length; i += 4) {
+    image.data[i] = (v >> 16) & 0xff;
+    image.data[i + 1] = (v >> 8) & 0xff;
+    image.data[i + 2] = v & 0xff;
+    image.data[i + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+  cachedFlat = await encodePng(canvas);
+  return cachedFlat;
 }

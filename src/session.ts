@@ -20,6 +20,14 @@ export interface Answer {
 
 export class SessionError extends Error {}
 
+/** セッションの作り方の指定。 */
+export interface SessionOptions {
+  /** 出題を1つの山（トラック）に絞る。未指定なら全部の山から */
+  mountainId?: string | null;
+  /** テストから固定できるようにした乱数 */
+  random?: () => number;
+}
+
 /** 出題可能な地点が無いときに、なぜ無いのかを画面に出せるようにする。 */
 export function describeEmpty(viewMode: ViewMode): string {
   return viewMode === 'map2d'
@@ -62,16 +70,21 @@ export class QuizSession {
   static challenge(
     data: QuizData,
     viewMode: ViewMode,
-    random: () => number = Math.random,
+    options: SessionOptions = {},
   ): QuizSession {
-    const pool = playablePoints(data, viewMode);
+    const random = options.random ?? Math.random;
+    const pool = playablePoints(data, viewMode, options.mountainId);
     const picked = shuffled(pool, random).slice(0, Math.min(CHALLENGE_COUNT, pool.length));
     return new QuizSession(data, 'challenge10', viewMode, picked);
   }
 
-  /** 全地点を1問ずつ。順序は固定（山→id順）で、再開しても変わらない。 */
-  static completeAll(data: QuizData, viewMode: ViewMode): QuizSession {
-    const pool = [...playablePoints(data, viewMode)].sort((a, b) =>
+  /** 全地点を1問ずつ。順序は固定（id順）で、再開しても変わらない。 */
+  static completeAll(
+    data: QuizData,
+    viewMode: ViewMode,
+    options: SessionOptions = {},
+  ): QuizSession {
+    const pool = [...playablePoints(data, viewMode, options.mountainId)].sort((a, b) =>
       a.id.localeCompare(b.id),
     );
     return new QuizSession(data, 'complete_all', viewMode, pool);

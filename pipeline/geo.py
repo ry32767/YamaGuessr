@@ -226,6 +226,46 @@ def normalize_quat(q: tuple[float, float, float, float]
     return (q[0] / n, q[1] / n, q[2] / n, q[3] / n)
 
 
+def simplify(points: Sequence[LatLon], tolerance_m: float = 8.0) -> list[LatLon]:
+    """Ramer–Douglas–Peucker で折れ線を間引く。
+
+    配信するトラックの点数を減らすために使う。許容誤差 8m 程度なら、
+    地形図の縮尺で見て元の線と区別がつかない。
+    """
+    if len(points) <= 2:
+        return list(points)
+    plane = LocalPlane(points[0].lat, points[0].lon)
+    xy = [plane.to_xy(p.lat, p.lon) for p in points]
+
+    keep = [False] * len(points)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(points) - 1)]
+    while stack:
+        start, end = stack.pop()
+        if end <= start + 1:
+            continue
+        x0, y0 = xy[start]
+        x1, y1 = xy[end]
+        dx, dy = x1 - x0, y1 - y0
+        seg_len = math.hypot(dx, dy)
+        best_i = -1
+        best_d = 0.0
+        for i in range(start + 1, end):
+            px, py = xy[i]
+            if seg_len == 0:
+                d = math.hypot(px - x0, py - y0)
+            else:
+                d = abs(dy * px - dx * py + x1 * y0 - y1 * x0) / seg_len
+            if d > best_d:
+                best_d = d
+                best_i = i
+        if best_i >= 0 and best_d > tolerance_m:
+            keep[best_i] = True
+            stack.append((start, best_i))
+            stack.append((best_i, end))
+    return [p for p, k in zip(points, keep) if k]
+
+
 def circular_mean_deg(angles: Iterable[float]) -> float:
     """角度の円周平均 [deg]（0〜360）。"""
     xs = ys = 0.0

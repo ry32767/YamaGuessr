@@ -15,7 +15,7 @@ export type PointType =
 /** 地点の出所 */
 export type PointSource = 'auto' | 'manual';
 
-/** 山（1本の登山動画＋GPXに対応する単位） */
+/** 山（1本のGPXトラックに対応する単位） */
 export interface Mountain {
   readonly id: string;
   readonly name: string;
@@ -23,6 +23,21 @@ export interface Mountain {
   readonly max_distance_m: number;
   /** スコア減衰の急峻さ係数（既定4） */
   readonly scoring_k: number;
+  /**
+   * 地形図に描くGPXトラック（GeoJSON Feature）のパス。public/ からの相対。
+   * GPX無しで作った山では省略される。
+   */
+  readonly track_path?: string;
+}
+
+/** トラック（GeoJSON の LineString Feature） */
+export interface TrackFeature {
+  readonly type: 'Feature';
+  readonly properties: Record<string, unknown>;
+  readonly geometry: {
+    readonly type: 'LineString';
+    readonly coordinates: readonly (readonly [number, number])[];
+  };
 }
 
 /** 出題地点 */
@@ -33,6 +48,8 @@ export interface QuizPoint {
   readonly lat: number;
   /** GPXルート上にスナップ済みの経度（生GPSではない） */
   readonly lon: number;
+  /** 国土地理院DEM由来の標高 [m]。3Dビューの視点の高さに使う */
+  readonly elevation_m?: number;
   readonly type: PointType;
   /**
    * public/ からの相対パス。**任意**。

@@ -45,7 +45,8 @@ erDiagram
       "id": "yamada-2026-07-11",
       "name": "◯◯山",
       "max_distance_m": 850,
-      "scoring_k": 4
+      "scoring_k": 4,
+      "track_path": "data/tracks/yamada-2026-07-11.json"
     }
   ],
   "points": [
@@ -80,8 +81,10 @@ erDiagram
 | `dataset_version` | 生成日時ベースの文字列。全地点制覇の進捗互換性判定とスコア記録に使う |
 | `Mountain.max_distance_m` | スコア計算の最大距離。GPXルートのバウンディングボックス対角線 × 0.5（厳しめ、[pipeline.md](pipeline.md)参照） |
 | `Mountain.scoring_k` | スコア減衰の急峻さ係数（既定4、大きいほど厳しい） |
+| `Mountain.track_path` | 地形図に描くGPXトラック（GeoJSON LineString）のパス。山ごとの別ファイルで、遊ぶ山のぶんだけ読み込む。GPX無しで作った山では省略 |
 | `Point.lat/lon` | **GPXルート上にスナップ済みの座標**（生GPSではない。理由は[spec.md](spec.md)の設計判断表） |
 | `Point.type` | `bend`(ルート屈曲) / `ridge_view`(尾根谷が見える) / `ridge_start`(尾根に乗り始め) / `peak` / `col` / `manual`(手動追加) |
+| `Point.elevation_m` | 地理院DEM由来の標高。**3Dビューで視点をこの高さに置く**ためにフロントへ渡す（タイル読み込みを待たずに正しい視点を作れる） |
 | `Point.image_path` | **任意**。省略された地点は画像を持たず、**モード②（3D地形）専用**として出題する（[spec.md](spec.md)の設計判断表） |
 | `Point.media_id` | 画像の出所メディア（分割動画・後から足した素材の識別）。画像が無い地点では省略 |
 | `Point.frame_time_s` | レビューで確定した切り出し時刻（動画先頭からの秒）。画像が無い地点では省略 |
@@ -90,6 +93,22 @@ erDiagram
 | `Point.source` | `auto`（自動検出→採用）／`manual`（レビュー時に人間が追加） |
 
 **含めないもの**：生GPS座標、`snap_distance_m`、品質スコア（`blur_score`等）、`aux1`/`aux2`。これらは中間ファイル（`pipeline/data/`）に留め、公開JSONには出さない（不要な情報を配信しないため）。
+
+## トラック（`public/data/tracks/{mountain_id}.json`）
+
+地形図に重ねて描くルート。GeoJSON の LineString Feature 1つだけを持つ。
+
+```json
+{
+  "type": "Feature",
+  "properties": { "mountain_id": "yamada-2026-07-11" },
+  "geometry": { "type": "LineString", "coordinates": [[135.877, 34.403], ...] }
+}
+```
+
+- 元のGPXを Ramer–Douglas–Peucker で**許容誤差8mまで間引く**（実績：425点 → 100点 / 2.6KB）。地形図の縮尺では元の線と区別がつかない
+- 山ごとに別ファイルにしているので、山が増えても `quiz_points.json` は太らない
+- 座標は小数6桁（約0.1m）に丸める
 
 ## Supabaseスキーマ（`supabase/schema.sql`）
 

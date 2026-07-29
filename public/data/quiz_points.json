@@ -1,11 +1,12 @@
 {
- "dataset_version": "2026-07-29T11:54:08Z",
+ "dataset_version": "2026-07-29T13:24:22Z",
  "mountains": [
   {
    "id": "odaigahara-2026-06-11",
    "name": "大台ヶ原・日出ヶ岳",
    "max_distance_m": 1565.7,
-   "scoring_k": 4.0
+   "scoring_k": 4.0,
+   "track_path": "data/tracks/odaigahara-2026-06-11.json"
   }
  ],
  "points": [
@@ -14,6 +15,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1804111,
    "lon": 136.0979063,
+   "elevation_m": 1575.8,
    "type": "bend",
    "source": "auto"
   },
@@ -22,6 +24,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1815721,
    "lon": 136.0999373,
+   "elevation_m": 1577.1,
    "type": "bend",
    "source": "auto"
   },
@@ -30,6 +33,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1834309,
    "lon": 136.1018053,
+   "elevation_m": 1579.5,
    "type": "bend",
    "source": "auto"
   },
@@ -38,6 +42,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1846374,
    "lon": 136.1009824,
+   "elevation_m": 1581.6,
    "type": "bend",
    "source": "auto"
   },
@@ -46,6 +51,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1845532,
    "lon": 136.1048609,
+   "elevation_m": 1580.3,
    "type": "bend",
    "source": "auto"
   },
@@ -54,6 +60,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1851909,
    "lon": 136.1093076,
+   "elevation_m": 1692.9,
    "type": "peak",
    "source": "auto"
   },
@@ -62,6 +69,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1865992,
    "lon": 136.111899,
+   "elevation_m": 1586.6,
    "type": "ridge_start",
    "source": "auto"
   },
@@ -70,6 +78,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1880098,
    "lon": 136.115549,
+   "elevation_m": 1517.5,
    "type": "col",
    "source": "auto"
   },
@@ -78,6 +87,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.187901,
    "lon": 136.1129024,
+   "elevation_m": 1563.6,
    "type": "ridge_view",
    "source": "auto"
   },
@@ -86,6 +96,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1853946,
    "lon": 136.1110031,
+   "elevation_m": 1651.8,
    "type": "ridge_view",
    "source": "auto"
   },
@@ -94,6 +105,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1830748,
    "lon": 136.1091248,
+   "elevation_m": 1643.0,
    "type": "col",
    "source": "auto"
   },
@@ -102,6 +114,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1809968,
    "lon": 136.108894,
+   "elevation_m": 1682.5,
    "type": "peak",
    "source": "auto"
   },
@@ -110,6 +123,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1782161,
    "lon": 136.1073697,
+   "elevation_m": 1614.4,
    "type": "col",
    "source": "auto"
   },
@@ -118,6 +132,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1753842,
    "lon": 136.1065499,
+   "elevation_m": 1636.6,
    "type": "peak",
    "source": "auto"
   },
@@ -126,6 +141,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1740282,
    "lon": 136.1025941,
+   "elevation_m": 1578.6,
    "type": "col",
    "source": "auto"
   },
@@ -134,6 +150,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1727122,
    "lon": 136.0990997,
+   "elevation_m": 1576.3,
    "type": "col",
    "source": "auto"
   },
@@ -142,6 +159,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1715631,
    "lon": 136.0958123,
+   "elevation_m": 1589.6,
    "type": "ridge_start",
    "source": "auto"
   },
@@ -150,6 +168,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1705955,
    "lon": 136.091196,
+   "elevation_m": 1552.5,
    "type": "col",
    "source": "auto"
   },
@@ -158,6 +177,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1718264,
    "lon": 136.0935958,
+   "elevation_m": 1599.5,
    "type": "peak",
    "source": "auto"
   },
@@ -166,6 +186,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.174644,
    "lon": 136.0926886,
+   "elevation_m": 1524.8,
    "type": "ridge_view",
    "source": "auto"
   },
@@ -174,6 +195,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1761726,
    "lon": 136.0907768,
+   "elevation_m": 1502.6,
    "type": "ridge_view",
    "source": "auto"
   },
@@ -182,6 +204,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1779641,
    "lon": 136.0904124,
+   "elevation_m": 1419.2,
    "type": "col",
    "source": "auto"
   },
@@ -190,6 +213,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1793554,
    "lon": 136.090446,
+   "elevation_m": 1477.9,
    "type": "ridge_start",
    "source": "auto"
   },
@@ -198,6 +222,7 @@
    "mountain_id": "odaigahara-2026-06-11",
    "lat": 34.1813691,
    "lon": 136.0906258,
+   "elevation_m": 1513.6,
    "type": "ridge_view",
    "source": "auto"
   }

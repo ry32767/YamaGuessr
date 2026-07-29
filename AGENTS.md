@@ -34,6 +34,7 @@ npm run build      # 本番ビルド
 ```bash
 pip install -r pipeline/requirements.txt
 pytest pipeline/                                   # 前処理ロジックのユニットテスト
+python pipeline/studio.py                          # ← 出題データ追加のローカルUI（127.0.0.1限定）
 python pipeline/extract_telemetry.py Source/DJI_xxx.MP4 \
   -o pipeline/data/telemetry.csv \
   --json pipeline/data/telemetry.json \

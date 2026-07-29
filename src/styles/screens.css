@@ -177,6 +177,73 @@
   line-height: 1.5;
 }
 
+/* コース（トラック）選択。山が増えるので縦に積んで一覧性を優先する */
+.tracks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.track {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'name count' 'detail count';
+  gap: 0 var(--s-3);
+  align-items: center;
+  text-align: left;
+  min-height: var(--tap);
+  padding: var(--s-3);
+  border: var(--border);
+  border-radius: var(--r-md);
+  background: var(--c-dusk);
+  color: var(--c-snow);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.track:hover:not(:disabled) {
+  border-color: var(--c-mist-hi);
+  background: var(--c-mist);
+}
+
+.track[aria-pressed='true'] {
+  border-color: var(--c-alt);
+  background: color-mix(in srgb, var(--c-alt) 12%, var(--c-dusk));
+}
+
+.track:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.track__name {
+  grid-area: name;
+  font-weight: 700;
+}
+
+/* 選択中は色だけでなくテキストでも示す */
+.track[aria-pressed='true'] .track__name::after {
+  content: '（選択中）';
+  font-weight: 500;
+  font-size: var(--fs-xs);
+  color: var(--c-alt);
+}
+
+.track__detail {
+  grid-area: detail;
+  font-size: var(--fs-sm);
+  color: var(--c-slate);
+}
+
+.track__count {
+  grid-area: count;
+  font-size: var(--fs-sm);
+  color: var(--c-slate);
+  white-space: nowrap;
+}
+
 /* --- 出題画面 --------------------------------------------------------------
    狭幅：画像を上、地図を下（親指が届く側に地図）。
    広幅：画像を左、地図を右。どちらでも地図が最大面積を占める。 */
@@ -222,6 +289,39 @@
   flex: 1;
   min-height: 0;
   position: relative;
+  touch-action: none; /* 見回しのドラッグをブラウザのスクロールに取られない */
+}
+
+/* 3Dビューの足元表示。「どこに立っていて、どちらを向いているか」を常に出す */
+.terrain-hud {
+  position: absolute;
+  top: var(--s-2);
+  left: var(--s-2);
+  z-index: 3;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-full);
+  background: rgba(16, 22, 31, 0.78);
+  border: var(--border);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.terrain-hud__here {
+  color: var(--c-alt);
+  font-weight: 700;
+}
+
+.terrain-hud__facing {
+  font-weight: 700;
+}
+
+.terrain-hud__dir,
+.terrain-hud__ele {
+  color: var(--c-slate);
 }
 
 .quiz__answer {

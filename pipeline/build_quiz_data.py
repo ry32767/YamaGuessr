@@ -25,20 +25,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from geo import LatLon, haversine_m
+from geo import LatLon, haversine_m, simplify
 from gpx import load_gpx
 
 #: max_distance_m = GPXルートのバウンディングボックス対角線 × この係数（厳しめ）
 DEFAULT_MAX_DISTANCE_FACTOR = 0.5
+#: 配信用トラックの簡略化の許容誤差 [m]。地形図の縮尺では元の線と区別がつかない
+DEFAULT_TRACK_TOLERANCE_M = 8.0
 #: スコア減衰の急峻さ（既定4、大きいほど厳しい）
 DEFAULT_SCORING_K = 4.0
 #: max_distance_m の下限 [m]（ごく短いルートで0点必至にならないように）
 MIN_MAX_DISTANCE_M = 200.0
 
+#: 公開するトラックの置き場（public/ からの相対パス）
+TRACK_DIR = "data/tracks"
+
 #: 公開JSONに出してよいPointのフィールド（これ以外は落とす）
 PUBLIC_POINT_FIELDS = (
-    "id", "mountain_id", "lat", "lon", "type", "image_path", "media_id",
-    "frame_time_s", "heading_deg", "heading_route_deg", "source",
+    "id", "mountain_id", "lat", "lon", "elevation_m", "type", "image_path",
+    "media_id", "frame_time_s", "heading_deg", "heading_route_deg", "source",
 )
 
 
@@ -109,7 +114,9 @@ def build_points(confirmed: dict[str, Any], images_dir: Optional[Path],
             "type": p["type"],
             "source": p.get("source", "auto"),
         }
-        for key in ("media_id", "frame_time_s", "heading_deg", "heading_route_deg"):
+        # elevation_m は地理院DEM由来の公開情報。3Dビューで視点の高さに使う
+        for key in ("elevation_m", "media_id", "frame_time_s",
+                    "heading_deg", "heading_route_deg"):
             if p.get(key) is not None:
                 point[key] = p[key]
 
@@ -134,6 +141,37 @@ def build_points(confirmed: dict[str, Any], images_dir: Optional[Path],
     return out
 
 
+def write_track(gpx_path: str | Path, public_dir: Path, mountain_id: str,
+                tolerance_m: float = DEFAULT_TRACK_TOLERANCE_M) -> dict[str, Any]:
+    """GPXを簡略化して、地形図に描くためのGeoJSONを書き出す。
+
+    トラックは山ごとに別ファイルにする。山が増えても quiz_points.json が
+    肥大せず、遊ぶ山のぶんだけ読み込めばよいため。
+    """
+    track = load_gpx(gpx_path)
+    raw = [LatLon(p.lat, p.lon) for p in track.points]
+    thinned = simplify(raw, tolerance_m)
+
+    rel = f"{TRACK_DIR}/{mountain_id}.json"
+    out = public_dir / rel
+    out.parent.mkdir(parents=True, exist_ok=True)
+    feature = {
+        "type": "Feature",
+        "properties": {"mountain_id": mountain_id},
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [[round(p.lon, 6), round(p.lat, 6)] for p in thinned],
+        },
+    }
+    out.write_text(json.dumps(feature, ensure_ascii=False), encoding="utf-8")
+    return {
+        "path": rel,
+        "point_count": len(thinned),
+        "original_point_count": len(raw),
+        "bytes": out.stat().st_size,
+    }
+
+
 def merge_quiz_data(existing: Optional[dict[str, Any]], mountain: dict[str, Any],
                     points: Sequence[dict[str, Any]], version: str) -> dict[str, Any]:
     """既存の quiz_points.json に、この山のぶんを差し替えてマージする。"""
@@ -155,6 +193,7 @@ def run(confirmed_path: str, gpx: Optional[str] = None,
         images_dir: Optional[str] = None, public_dir: str = "public",
         max_distance_factor: float = DEFAULT_MAX_DISTANCE_FACTOR,
         scoring_k: float = DEFAULT_SCORING_K,
+        track_tolerance_m: float = DEFAULT_TRACK_TOLERANCE_M,
         now: Optional[datetime] = None,
         quiet: bool = False) -> dict[str, Any]:
     """quiz_points.json を生成（既存があればマージ）して meta を返す。"""
@@ -173,12 +212,17 @@ def run(confirmed_path: str, gpx: Optional[str] = None,
     else:
         max_distance_m = max_distance_from_points(points, max_distance_factor)
 
-    mountain = {
+    mountain: dict[str, Any] = {
         "id": confirmed["mountain"]["id"],
         "name": confirmed["mountain"]["name"],
         "max_distance_m": round(max_distance_m, 1),
         "scoring_k": scoring_k,
     }
+
+    track_info: Optional[dict[str, Any]] = None
+    if gpx:
+        track_info = write_track(gpx, public, mountain["id"], track_tolerance_m)
+        mountain["track_path"] = track_info["path"]
 
     existing: Optional[dict[str, Any]] = None
     if data_path.exists():
@@ -200,12 +244,20 @@ def run(confirmed_path: str, gpx: Optional[str] = None,
         "terrain_only": len(points) - with_image,
         "total_mountains": len(merged["mountains"]),
         "total_points": len(merged["points"]),
+        "track": track_info,
     }
     if not quiet:
         print(f"山: {mountain['name']}（{mountain['id']}） "
               f"max_distance_m={mountain['max_distance_m']} k={mountain['scoring_k']}")
         print(f"地点: {len(points)}件（画像あり {with_image} / 3D専用 "
               f"{meta['terrain_only']}）")
+        if track_info:
+            print(f"トラック: {track_info['original_point_count']}点 → "
+                  f"{track_info['point_count']}点に簡略化"
+                  f"（{track_info['bytes']}B）→ {track_info['path']}")
+        else:
+            print("注意: --gpx が無いためトラックを出力しません"
+                  "（地形図にルートが表示されません）", file=sys.stderr)
         print(f"quiz_points.json: 全{meta['total_mountains']}山 "
               f"{meta['total_points']}地点  version={version}")
         print(f"書き出し: {data_path}")
@@ -223,10 +275,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--max-distance-factor", type=float,
                     default=DEFAULT_MAX_DISTANCE_FACTOR)
     ap.add_argument("--scoring-k", type=float, default=DEFAULT_SCORING_K)
+    ap.add_argument("--track-tolerance-m", type=float,
+                    default=DEFAULT_TRACK_TOLERANCE_M,
+                    help="地形図に描くトラックの簡略化の許容誤差")
     args = ap.parse_args(argv)
     try:
         run(args.confirmed, args.gpx, args.images_dir, args.public_dir,
-            args.max_distance_factor, args.scoring_k)
+            args.max_distance_factor, args.scoring_k, args.track_tolerance_m)
     except (BuildError, ValueError, OSError, json.JSONDecodeError) as e:
         print(f"エラー: {e}", file=sys.stderr)
         return 1

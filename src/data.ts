@@ -1,5 +1,5 @@
 /** 出題データ（public/data/quiz_points.json）の読み込みと参照。 */
-import type { Mountain, QuizData, QuizPoint } from './types';
+import type { Mountain, QuizData, QuizPoint, TrackFeature } from './types';
 import { hasImage } from './types';
 
 const QUIZ_DATA_URL = `${import.meta.env.BASE_URL}data/quiz_points.json`;
@@ -33,6 +33,32 @@ export async function loadQuizData(): Promise<QuizData> {
 /** テストや再読込のためにキャッシュを捨てる。 */
 export function resetQuizDataCache(): void {
   cache = null;
+  trackCache.clear();
+}
+
+const trackCache = new Map<string, TrackFeature | null>();
+
+/**
+ * 山のGPXトラックを読む。地形図に重ねて描くために使う。
+ * 取得できなくてもゲームは続けられるので、失敗は null で返す。
+ */
+export async function loadTrack(mountain: Mountain): Promise<TrackFeature | null> {
+  if (!mountain.track_path) return null;
+  const cached = trackCache.get(mountain.id);
+  if (cached !== undefined) return cached;
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}${mountain.track_path}`);
+    if (!res.ok) {
+      trackCache.set(mountain.id, null);
+      return null;
+    }
+    const data = (await res.json()) as TrackFeature;
+    trackCache.set(mountain.id, data);
+    return data;
+  } catch {
+    trackCache.set(mountain.id, null);
+    return null;
+  }
 }
 
 /** 画像パスを配信URLに変換する。 */
@@ -43,12 +69,27 @@ export function imageUrl(point: QuizPoint): string | null {
 /**
  * そのビューで出題できる地点だけを返す。
  * 画像を持たない地点はモード②（3D地形）専用（docs/spec.md 設計判断表）。
+ *
+ * @param mountainId 指定するとその山（トラック）の地点だけに絞る
  */
 export function playablePoints(
   data: QuizData,
   viewMode: 'map2d' | 'terrain3d',
+  mountainId?: string | null,
 ): QuizPoint[] {
-  return viewMode === 'map2d' ? data.points.filter(hasImage) : [...data.points];
+  const byMountain = mountainId
+    ? data.points.filter((p) => p.mountain_id === mountainId)
+    : data.points;
+  return viewMode === 'map2d' ? byMountain.filter(hasImage) : [...byMountain];
+}
+
+/** その山でそのビューの出題があるか（選択UIの活性判定に使う）。 */
+export function playableCount(
+  data: QuizData,
+  viewMode: 'map2d' | 'terrain3d',
+  mountainId?: string | null,
+): number {
+  return playablePoints(data, viewMode, mountainId).length;
 }
 
 export function findMountain(data: QuizData, mountainId: string): Mountain | null {

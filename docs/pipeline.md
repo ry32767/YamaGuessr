@@ -151,8 +151,27 @@ Leafletベースの単一HTMLファイル。`candidates.json`を読み込み、�
 - **メタデータを全除去**（`-map_metadata -1`）
 - ファイル名は`{point_id}.webp`（緯度経度を含めない）
 
+## 0. `studio.py`（ローカル専用UI・任意）
+
+1〜6をブラウザから順に実行できる開発者用ツール。`Source/`のGPXと動画を選び、工程ごとに「実行」を押すとコマンドが走り、出力がそのまま画面に流れる。
+
+```bash
+python pipeline/studio.py          # http://127.0.0.1:8770
+```
+
+**127.0.0.1 にだけ待ち受ける**。GitHub Pagesに配信されるのは`public/`だけなので、このツールが公開されることはない。
+
+動画が無くGPXだけで3D専用地点を作るときは、レビューを省いて候補を一括採用する近道も使える。
+
+```bash
+python pipeline/adopt_candidates.py --candidates pipeline/data/candidates.json \
+  --mountain-id odaigahara-2026-06-11 --mountain-name "大台ヶ原・日出ヶ岳" \
+  --out pipeline/data/confirmed_points.json
+```
+
 ## 6. `build_quiz_data.py`
 - `confirmed_points.json`をMountain/Point構造（[data-model.md](data-model.md)参照）に変換。**公開JSONに出すのはスナップ後座標のみ**（生GPS・snap_distance・品質スコアは中間ファイルに留める）
+- **GPXを許容誤差8mで間引き、`public/data/tracks/{mountain_id}.json`に書き出す**（地形図に重ねて描くルート。実績：425点→100点 / 2.6KB）。`Mountain.track_path`から参照する
 - `max_distance_m` = GPXルートのバウンディングボックス対角線長 × 0.5（厳しめ、係数は引数で調整可能）
 - `dataset_version`（生成日時ISO文字列）を付与
 - 画像を`public/images/`、JSONを`public/data/quiz_points.json`にコピー・生成

@@ -3,7 +3,14 @@
  *
  * 地図が主役。UIは上下の薄い帯と、地図の上に浮く「回答する」ボタン1つだけ。
  */
-import { imageUrl, initialHeading, mountainView, type MapView } from '../data';
+import {
+  imageUrl,
+  initialHeading,
+  loadTrack,
+  mountainOf,
+  mountainView,
+  type MapView,
+} from '../data';
 import { AnswerMap } from '../map/answerMap';
 import { Terrain3D } from '../map/terrain3d';
 import { formatRadius, visibleRadii } from '../map/rings';
@@ -48,7 +55,7 @@ export function createQuizScreen(
     zoom: startView(first).zoom,
     onGuessChange: () => {
       actionButton.disabled = false;
-      hint.textContent = '「回答する」で確定します';
+      hint.textContent = '置き直せます。「回答する」で確定';
     },
   });
 
@@ -60,6 +67,7 @@ export function createQuizScreen(
     terrain = new Terrain3D(terrainHost, {
       center: { lat: first.lat, lon: first.lon },
       headingDeg: initialHeading(first),
+      groundElevationM: first.elevation_m,
     });
   }
 
@@ -68,7 +76,11 @@ export function createQuizScreen(
     alt: 'この地点から撮影した1コマ。ここがどこかを地形図で当てます。',
   }) as HTMLImageElement;
 
-  const hint = el('div', { class: 'map__hint' }, '地形図をタップして推測地点を置く');
+  const hint = el(
+    'div',
+    { class: 'map__hint' },
+    'このルートのどこかです。地形図をタップして推測地点を置く',
+  );
   const actionButton = el(
     'button',
     { class: 'btn btn--primary quiz__action', type: 'button', disabled: true },
@@ -77,6 +89,17 @@ export function createQuizScreen(
   append(answerArea, hint, actionButton);
 
   let resultPanel: HTMLElement | null = null;
+  let shownTrackId: string | null = null;
+
+  /** 山が変わったときだけトラックを読み直して地形図に重ねる。 */
+  async function syncTrack(point: QuizPoint): Promise<void> {
+    if (shownTrackId === point.mountain_id) return;
+    shownTrackId = point.mountain_id;
+    const track = await loadTrack(mountainOf(session.data, point));
+    // 読み込み中に次の問題へ進んで山が変わっていたら捨てる
+    if (shownTrackId !== point.mountain_id) return;
+    answerMap.showTrack(track);
+  }
 
   /**
    * 出題開始時の地図。**正解地点を中心にしない**（画面中央がそのまま答えになる）。
@@ -117,11 +140,16 @@ export function createQuizScreen(
     actionButton.textContent = '回答する';
     actionButton.hidden = false;
     hint.hidden = false;
-    hint.textContent = '地形図をタップして推測地点を置く';
+    hint.textContent = 'このルートのどこかです。地形図をタップして推測地点を置く';
     renderMedia(point);
     const view = startView(point);
     answerMap.reset(view.center, view.zoom);
-    terrain?.moveTo({ lat: point.lat, lon: point.lon }, initialHeading(point));
+    void syncTrack(point);
+    terrain?.moveTo(
+      { lat: point.lat, lon: point.lon },
+      initialHeading(point),
+      point.elevation_m,
+    );
     window.requestAnimationFrame(() => {
       answerMap.resize();
       terrain?.resize();

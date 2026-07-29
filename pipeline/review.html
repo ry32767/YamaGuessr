@@ -572,6 +572,7 @@ function buildConfirmed() {
       point.frame_time_s = Math.round((c.frame_time_s + c._offset) * 100) / 100;
       if (c.media_id) point.media_id = c.media_id;
     }
+    if (c.elevation_m !== undefined) point.elevation_m = c.elevation_m;
     if (c.heading_deg !== undefined) point.heading_deg = c.heading_deg;
     if (c.heading_route_deg !== undefined) point.heading_route_deg = c.heading_route_deg;
     return point;

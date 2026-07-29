@@ -40,9 +40,11 @@ YamaGuessr/
 ├── .github/workflows/     # GitHub Pagesへのデプロイ
 ├── docs/                  # 仕様・設計ドキュメント
 ├── pipeline/              # 動画→出題データの前処理（Python、ローカル実行）
+│   ├── studio.py              # 出題データ追加のローカルUI（127.0.0.1限定）
 │   ├── extract_telemetry.py   # DJI動画→テレメトリ
 │   ├── match_gpx.py           # テレメトリ×GPX→track.json
 │   ├── detect_candidates.py   # 出題候補の自動検出
+│   ├── adopt_candidates.py    # 候補の一括採用（レビュー省略の近道）
 │   ├── dem.py                 # 国土地理院の標高タイル
 │   ├── frame_quality.py       # フレームのブレ・明るさ判定
 │   ├── geo.py / gpx.py        # 幾何計算・GPX読み込み
@@ -82,14 +84,27 @@ pip install -r pipeline/requirements.txt
 
 1. `pipeline/` で動画とGPXから出題地点を作成（開発者のみ、詳細は [docs/pipeline.md](docs/pipeline.md)）
 2. サイトを開き、ニックネームを設定
-3. 遊び方（10問チャレンジ／全地点制覇）と手がかり（地形図当て／3D地形当て）を選ぶ
+3. 遊び方（10問チャレンジ／全地点制覇）、手がかり（地形図当て／3D地形当て）、コース（山）を選ぶ
 4. 写真か3D地形を見て、地形図をタップして回答
 5. 回答後は正解を中心にした**距離リング**が出て、どのリングに入ったかが分かる
 6. リーダーボードで順位を確認
 
-> 動画のフレームが無い地点は、**3D地形当てモード専用**として出題されます。GPXとDEMさえあれば出題できるので、出題数が動画の量に縛られません。
+- 地形図には**歩いたGPXルートが重ねて描かれます**。「このルートのどこか」を当てる問題です
+- 3D地形当ては**その地点に立った一人称視点**です。ドラッグで360度見回せて、画面には方位と標高が出ます
+- 動画のフレームが無い地点は、**3D地形当てモード専用**として出題されます。GPXとDEMさえあれば出題できるので、出題数が動画の量に縛られません
 
 ## 出題データを作る（開発者向け）
+
+いちばん簡単なのはローカルUIです。`Source/` にGPXと動画を置いてから：
+
+```bash
+python pipeline/studio.py
+```
+
+ブラウザが開くので、GPXと動画を選んで工程を上から順に「実行」します。127.0.0.1にだけ待ち受けるので、このツールが外に公開されることはありません。
+
+<details>
+<summary>コマンドで1つずつ実行する場合</summary>
 
 ```bash
 # 1. 動画からテレメトリを抽出（タイムラプス倍率・GPSの健全性もここで分かる）
@@ -114,10 +129,23 @@ python -m http.server   # ルートで起動し /pipeline/review.html を開く
 python pipeline/extract_frames.py final --confirmed pipeline/data/confirmed_points.json \
   --video clip=Source/DJI_xxx.MP4 --out-dir pipeline/data/frames
 
-# 6. 公開用 quiz_points.json を作る（既存の山はマージされる）
+# 6. 公開用 quiz_points.json とトラックを作る（既存の山はマージされる）
 python pipeline/build_quiz_data.py --confirmed pipeline/data/confirmed_points.json \
   --gpx Source/route.gpx --images-dir pipeline/data/frames --public-dir public
 ```
+
+動画が無く、3D専用の出題地点だけ作る場合は 3 → 一括採用 → 6 だけで済みます。
+
+```bash
+python pipeline/detect_candidates.py --gpx Source/route.gpx --out pipeline/data/candidates.json
+python pipeline/adopt_candidates.py --candidates pipeline/data/candidates.json \
+  --mountain-id my-mountain-2026-06-11 --mountain-name "◯◯山" \
+  --out pipeline/data/confirmed_points.json
+python pipeline/build_quiz_data.py --confirmed pipeline/data/confirmed_points.json \
+  --gpx Source/route.gpx --public-dir public
+```
+
+</details>
 
 ## 開発者・AIエージェント向け
 - 作業規約・検証ループ・ドキュメント同期は [AGENTS.md](AGENTS.md)（全エージェント共通）
