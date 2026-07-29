@@ -1,0 +1,12 @@
+# 前処理パイプライン（ローカル実行のみ。CI/デプロイには含まない）
+pytest>=8.0
+
+# GPX 解析 / 幾何計算（match_gpx.py, detect_candidates.py）
+gpxpy>=1.6
+numpy>=1.26
+
+# フレーム品質評価（ブレ・輝度）と画像書き出し（extract_frames.py）
+# ※ 動画のデコード自体は ffmpeg コマンドに任せる
+opencv-python-headless>=4.9
+Pillow>=10.0
+requests>=2.31

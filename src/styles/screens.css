@@ -1,0 +1,529 @@
+/** 画面レイアウト。「図郭」＝地図が最大面積を占め、UIは上下の薄い帯。 */
+
+#app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- 上部バー（図郭の上辺） ------------------------------------------------ */
+.chrome {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--s-2);
+  height: calc(var(--chrome-h) + var(--safe-t));
+  padding: var(--safe-t) var(--s-2) 0;
+  background: var(--c-dusk);
+  border-bottom: var(--border);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* 狭幅では進捗バーを落として、見出しと操作を1行に収める */
+@media (max-width: 26rem) {
+  .progress__bar {
+    display: none;
+  }
+
+  .chrome .btn--ghost {
+    padding-left: var(--s-2);
+    padding-right: var(--s-2);
+  }
+}
+
+/* ホームに戻る導線。タップ領域を44px確保する */
+.chrome__title {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 var(--s-1);
+  margin-left: calc(var(--s-1) * -1);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chrome__title:hover {
+  background: var(--c-mist);
+}
+
+.chrome__title span {
+  color: var(--c-alt);
+}
+
+/* 現在地の明示：何問中の何問目か。等幅で桁がぶれない。 */
+.progress {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-1);
+  font-family: var(--font-num);
+  font-size: var(--fs-sm);
+  color: var(--c-slate);
+}
+
+.progress b {
+  color: var(--c-snow);
+  font-size: var(--fs-base);
+}
+
+.progress__bar {
+  width: 5rem;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--c-mist);
+  overflow: hidden;
+}
+
+.progress__bar i {
+  display: block;
+  height: 100%;
+  background: var(--c-alt);
+  transition: width var(--dur-base) var(--ease);
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- ホーム ---------------------------------------------------------------- */
+.home {
+  width: 100%;
+  max-width: var(--panel-max);
+  margin: 0 auto;
+  padding: var(--s-8) var(--s-4) calc(var(--s-8) + var(--safe-b));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+
+.home__lead {
+  color: var(--c-slate);
+}
+
+.home h2 {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--c-slate);
+  letter-spacing: 0.06em;
+}
+
+/* モード選択：2つの選択肢を同格に並べ、主アクションは下の1つに集約する */
+.choices {
+  display: grid;
+  gap: var(--s-2);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 40rem) {
+  .choices {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  align-items: flex-start;
+  text-align: left;
+  min-height: var(--tap);
+  padding: var(--s-3);
+  border: var(--border);
+  border-radius: var(--r-md);
+  background: var(--c-dusk);
+  color: var(--c-snow);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.choice:hover {
+  border-color: var(--c-mist-hi);
+  background: var(--c-mist);
+}
+
+.choice[aria-pressed='true'] {
+  border-color: var(--c-alt);
+  background: color-mix(in srgb, var(--c-alt) 12%, var(--c-dusk));
+}
+
+.choice__name {
+  font-weight: 700;
+}
+
+/* 選択中は色だけでなくテキストでも示す */
+.choice[aria-pressed='true'] .choice__name::after {
+  content: '（選択中）';
+  font-weight: 500;
+  font-size: var(--fs-xs);
+  color: var(--c-alt);
+}
+
+.choice__desc {
+  font-size: var(--fs-sm);
+  color: var(--c-slate);
+  line-height: 1.5;
+}
+
+/* --- 出題画面 --------------------------------------------------------------
+   狭幅：画像を上、地図を下（親指が届く側に地図）。
+   広幅：画像を左、地図を右。どちらでも地図が最大面積を占める。 */
+.quiz {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(30vh, 38vh) 1fr;
+}
+
+@media (min-width: 60rem) {
+  .quiz {
+    grid-template-rows: 1fr;
+    grid-template-columns: minmax(20rem, 38%) 1fr;
+  }
+}
+
+.quiz__media {
+  position: relative;
+  min-height: 0;
+  background: var(--c-ridge);
+  border-bottom: var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 60rem) {
+  .quiz__media {
+    border-bottom: none;
+    border-right: var(--border);
+  }
+}
+
+.quiz__photo {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background: #0a0e14;
+}
+
+.quiz__terrain {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.quiz__answer {
+  position: relative;
+  min-height: 0;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+/* 地図の上に浮く唯一の操作。地図を覆う面積を最小に保つ。 */
+.quiz__action {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--s-4) + var(--safe-b));
+  z-index: 3;
+  box-shadow: var(--shadow-float);
+  min-width: 12rem;
+}
+
+.map__hint {
+  position: absolute;
+  top: var(--s-2);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-full);
+  background: rgba(16, 22, 31, 0.82);
+  border: var(--border);
+  color: var(--c-slate);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 画像を持たない地点（モード②専用）の説明 */
+.media-note {
+  padding: var(--s-3) var(--s-4);
+  color: var(--c-slate);
+  font-size: var(--fs-sm);
+  border-bottom: var(--border);
+}
+
+/* --- 結果 ------------------------------------------------------------------ */
+.result {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 4;
+  padding: var(--s-4);
+  padding-bottom: calc(var(--s-4) + var(--safe-b));
+  background: var(--c-dusk);
+  border-top: var(--border);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.result__score {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+
+.result__points {
+  font-family: var(--font-num);
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.result__points--near {
+  color: var(--c-near);
+}
+
+.result__points--far {
+  color: var(--c-far);
+}
+
+.result__unit {
+  color: var(--c-slate);
+}
+
+.result__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-4);
+  font-size: var(--fs-sm);
+  color: var(--c-slate);
+}
+
+.result__facts b {
+  color: var(--c-snow);
+  font-family: var(--font-num);
+}
+
+/* --- セッション結果 --------------------------------------------------------- */
+.summary {
+  width: 100%;
+  max-width: var(--panel-max);
+  margin: 0 auto;
+  padding: var(--s-6) var(--s-4) calc(var(--s-8) + var(--safe-b));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.summary__total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+
+.summary__total .num {
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  color: var(--c-alt);
+  line-height: 1;
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--c-mist);
+  border: var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.breakdown__row {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr auto auto;
+  gap: var(--s-3);
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  background: var(--c-dusk);
+  font-size: var(--fs-sm);
+}
+
+.breakdown__row > .idx {
+  color: var(--c-slate);
+  font-family: var(--font-num);
+}
+
+.breakdown__row > .pts {
+  font-family: var(--font-num);
+  font-weight: 700;
+  text-align: right;
+}
+
+.breakdown__row > .dist {
+  font-family: var(--font-num);
+  color: var(--c-slate);
+  text-align: right;
+}
+
+/* --- リーダーボード --------------------------------------------------------- */
+.board {
+  width: 100%;
+  max-width: var(--panel-max);
+  margin: 0 auto;
+  padding: var(--s-6) var(--s-4) calc(var(--s-8) + var(--safe-b));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--s-1);
+  flex-wrap: wrap;
+}
+
+.tab {
+  min-height: var(--tap);
+  padding: var(--s-2) var(--s-3);
+  border: var(--border);
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--c-slate);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.tab[aria-selected='true'] {
+  background: var(--c-alt);
+  border-color: var(--c-alt);
+  color: var(--c-ridge);
+  font-weight: 700;
+}
+
+.rank {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr auto;
+  gap: var(--s-3);
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: var(--border);
+  font-size: var(--fs-sm);
+}
+
+.rank:last-child {
+  border-bottom: none;
+}
+
+.rank__pos {
+  font-family: var(--font-num);
+  color: var(--c-slate);
+}
+
+.rank__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank__score {
+  font-family: var(--font-num);
+  font-weight: 700;
+}
+
+.rank--me {
+  background: color-mix(in srgb, var(--c-alt) 10%, transparent);
+}
+
+.rank--me .rank__pos::after {
+  content: ' ★';
+  color: var(--c-alt);
+}
+
+/* --- 地図上のマーカー -------------------------------------------------------
+   推測は水系の青、正解は標高の暖色。形も変えて色だけに頼らない。 */
+.yg-marker {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(4, 8, 14, 0.6);
+}
+
+.yg-marker--guess {
+  background: var(--c-water);
+  border-radius: var(--r-full);
+}
+
+/* 正解は菱形。色覚に依らず一目で見分けられる */
+.yg-marker--actual {
+  background: var(--c-alt);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+/* 距離リングの注記。等高線の標高注記のような見え方にする（DESIGN.md のシグネチャ） */
+.yg-ring-label {
+  font-family: var(--font-num);
+  font-size: 11px;
+  font-weight: 700;
+  color: #7a5628;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 0 3px;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* --- ダイアログ ------------------------------------------------------------- */
+dialog.modal {
+  width: min(24rem, calc(100vw - var(--s-8)));
+  padding: var(--s-6);
+  border: var(--border);
+  border-radius: var(--r-md);
+  background: var(--c-dusk);
+  color: var(--c-snow);
+  box-shadow: var(--shadow-float);
+}
+
+dialog.modal::backdrop {
+  background: rgba(4, 8, 14, 0.7);
+}
+
+/* --- 通知（スコア送信失敗など。結果は消さない） ----------------------------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--s-4) + var(--safe-b));
+  z-index: 30;
+  max-width: min(28rem, calc(100vw - var(--s-8)));
+  padding: var(--s-3) var(--s-4);
+  border: var(--border);
+  border-left: 3px solid var(--c-alt);
+  border-radius: var(--r-md);
+  background: var(--c-dusk);
+  box-shadow: var(--shadow-float);
+  font-size: var(--fs-sm);
+}
+
+.toast--error {
+  border-left-color: var(--c-far);
+}

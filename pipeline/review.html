@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YamaGuessr 候補レビュー</title>
+<link rel="stylesheet" href="../node_modules/maplibre-gl/dist/maplibre-gl.css">
+<style>
+  :root {
+    --bg: #12161c;
+    --panel: #1b212a;
+    --line: #2c3542;
+    --text: #e6ebf2;
+    --muted: #8d99a8;
+    --accent: #4ea1ff;
+    --ok: #45c17a;
+    --ng: #d9534f;
+    --warn: #e2a03f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; white-space: nowrap; }
+  label.field { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+  input[type=text] {
+    background: #0e1218; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; min-width: 8rem; font: inherit;
+  }
+  button {
+    background: #263041; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer;
+    min-height: 32px;
+  }
+  button:hover { background: #2f3b4f; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+  button.adopt { background: var(--ok); border-color: var(--ok); color: #04240f; font-weight: 600; }
+  button.reject { background: var(--ng); border-color: var(--ng); color: #2a0605; font-weight: 600; }
+  .spacer { flex: 1; }
+  .counts { color: var(--muted); white-space: nowrap; }
+  .counts b { color: var(--text); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  #map { flex: 1; min-width: 0; }
+  aside {
+    width: 380px; flex-shrink: 0; overflow-y: auto;
+    background: var(--panel); border-left: 1px solid var(--line); padding: 12px;
+  }
+  @media (max-width: 820px) {
+    main { flex-direction: column; }
+    aside { width: auto; border-left: none; border-top: 1px solid var(--line); max-height: 55%; }
+  }
+
+  .empty { color: var(--muted); line-height: 1.7; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  .kv { display: grid; grid-template-columns: 7rem 1fr; gap: 2px 8px; margin: 8px 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; color: #06121f;
+  }
+  .preview {
+    width: 100%; aspect-ratio: 16/9; background: #0a0d12; border: 1px solid var(--line);
+    border-radius: 8px; object-fit: contain; display: block;
+  }
+  .preview-missing {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); text-align: center; padding: 12px; font-size: 13px;
+  }
+  input[type=range] { width: 100%; }
+  .hint { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .marker {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid rgba(0,0,0,.55); cursor: pointer; box-sizing: content-box;
+  }
+  .marker.selected { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .marker.adopted { border-color: #fff; box-shadow: 0 0 0 2px var(--ok); }
+  .marker.rejected { opacity: .28; }
+  .marker.low-quality { border-style: dashed; border-width: 3px; }
+  .marker.manual { border-radius: 3px; }
+  .legend {
+    position: absolute; left: 8px; bottom: 8px; z-index: 2;
+    background: rgba(27,33,42,.92); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; line-height: 1.9;
+  }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; }
+  .maplibregl-ctrl-attrib { font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>候補レビュー</h1>
+  <label class="field">山ID <input type="text" id="mountainId" placeholder="odaigahara-2026-06-11"></label>
+  <label class="field">山名 <input type="text" id="mountainName" placeholder="大台ヶ原・日出ヶ岳"></label>
+  <button id="loadBtn">ファイルを読み込む</button>
+  <label class="field">地図
+    <select id="baseMap" style="background:#0e1218;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px">
+      <option value="std">標準地図</option>
+      <option value="pale">淡色地図</option>
+      <option value="relief">色別標高図</option>
+      <option value="seamlessphoto">写真</option>
+    </select>
+  </label>
+  <span class="spacer"></span>
+  <span class="counts" id="counts">未読み込み</span>
+  <button class="primary" id="exportBtn" disabled>書き出し</button>
+</header>
+
+<main>
+  <div id="map" style="position:relative">
+    <div class="legend" id="legend"></div>
+  </div>
+  <aside id="panel">
+    <p class="empty" id="empty">
+      <b>使い方</b><br>
+      1. リポジトリのルートで <code>python -m http.server</code> を実行し、
+         <code>/pipeline/review.html</code> を開く<br>
+      2. <code>pipeline/data/</code> の candidates.json などを自動で読み込む<br>
+      3. ピンをクリック → <b>A</b> で採用 / <b>R</b> で却下<br>
+      4. 採用したら ← → で切り出し時刻を0.5秒ずつ調整<br>
+      5. 地図の空白を <b>Shift+クリック</b> で地点を手動追加<br>
+      6. 「書き出し」で confirmed_points.json を保存<br><br>
+      読み込めない場合は「ファイルを読み込む」から candidates.json /
+      track.json / previews/index.json を選んでください。
+    </p>
+    <div id="detail" hidden></div>
+  </aside>
+</main>
+
+<input type="file" id="filePicker" multiple accept=".json" hidden>
+
+<script src="../node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// 定数
+// ---------------------------------------------------------------------------
+const TYPE_COLORS = {
+  peak: '#ff6b6b', col: '#4ea1ff', ridge_view: '#45c17a',
+  ridge_start: '#e2a03f', bend: '#b78bff', manual: '#ffffff',
+};
+const TYPE_LABELS = {
+  peak: 'ピーク', col: 'コル', ridge_view: '展望', ridge_start: '尾根に乗り始め',
+  bend: '屈曲', manual: '手動追加',
+};
+const GSI_ATTRIBUTION =
+  '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>';
+const BASE_MAPS = {
+  std: 'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+  pale: 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+  relief: 'https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png',
+  seamlessphoto: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+};
+const PREVIEW_WINDOW_S = 5.0;
+const PREVIEW_STEP_S = 0.5;
+//: 手動追加した地点にテレメトリ時刻を紐づける最大距離 [m]
+const MANUAL_LINK_MAX_M = 200;
+const DATA_BASE = 'data/';
+
+// ---------------------------------------------------------------------------
+// 状態
+// ---------------------------------------------------------------------------
+const state = {
+  candidates: [],      // {…candidate, _status:'pending'|'adopted'|'rejected', _offset:0}
+  track: null,         // match_gpx.py の track.json
+  previews: null,      // previews/index.json の previews 部分
+  previewBase: DATA_BASE + 'previews/',
+  selectedId: null,
+  manualSeq: 0,
+  markers: new Map(),
+};
+
+// ---------------------------------------------------------------------------
+// 地図
+// ---------------------------------------------------------------------------
+function baseStyle(kind) {
+  return {
+    version: 8,
+    sources: {
+      base: {
+        type: 'raster',
+        tiles: [BASE_MAPS[kind] || BASE_MAPS.std],
+        tileSize: 256,
+        maxzoom: 18,
+        attribution: GSI_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: 'base', type: 'raster', source: 'base' }],
+  };
+}
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: baseStyle('std'),
+  center: [136.105, 34.18],
+  zoom: 13,
+  hash: false,
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), 'bottom-right');
+
+document.getElementById('baseMap').addEventListener('change', (e) => {
+  map.setStyle(baseStyle(e.target.value));
+});
+
+map.on('click', (e) => {
+  if (!e.originalEvent.shiftKey) return;
+  addManualPoint(e.lngLat.lat, e.lngLat.lng);
+});
+
+// ---------------------------------------------------------------------------
+// 読み込み
+// ---------------------------------------------------------------------------
+async function tryFetchJson(path) {
+  try {
+    const res = await fetch(path, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (_) {
+    return null;
+  }
+}
+
+function adoptCandidates(data) {
+  const list = (data && data.candidates) || [];
+  state.candidates = list.map((c) => ({
+    ...c,
+    _status: 'pending',
+    _offset: 0,
+  }));
+  state.manualSeq = 0;
+  renderMarkers();
+  fitToCandidates();
+  updateCounts();
+}
+
+function fitToCandidates() {
+  const pts = state.candidates;
+  if (!pts.length) return;
+  const b = new maplibregl.LngLatBounds();
+  pts.forEach((c) => b.extend([c.lon, c.lat]));
+  map.fitBounds(b, { padding: 60, maxZoom: 15, duration: 0 });
+}
+
+async function autoLoad() {
+  const candidates = await tryFetchJson(DATA_BASE + 'candidates.json');
+  if (candidates) adoptCandidates(candidates);
+  state.track = await tryFetchJson(DATA_BASE + 'track.json');
+  const previews = await tryFetchJson(state.previewBase + 'index.json');
+  if (previews) state.previews = previews.previews || null;
+  updateCounts();
+}
+
+document.getElementById('loadBtn').addEventListener('click', () => {
+  document.getElementById('filePicker').click();
+});
+
+document.getElementById('filePicker').addEventListener('change', async (e) => {
+  for (const file of e.target.files) {
+    let json;
+    try {
+      json = JSON.parse(await file.text());
+    } catch (_) {
+      alert(file.name + ' を JSON として読めませんでした');
+      continue;
+    }
+    if (json.candidates) adoptCandidates(json);
+    else if (json.samples) state.track = json;
+    else if (json.previews) state.previews = json.previews;
+    else alert(file.name + ' は candidates / track / previews のいずれでもありません');
+  }
+  updateCounts();
+  renderDetail();
+});
+
+// ---------------------------------------------------------------------------
+// マーカー
+// ---------------------------------------------------------------------------
+function markerClass(c) {
+  const cls = ['marker'];
+  if (c._status === 'adopted') cls.push('adopted');
+  if (c._status === 'rejected') cls.push('rejected');
+  if (c.low_quality) cls.push('low-quality');
+  if (c.type === 'manual') cls.push('manual');
+  if (c.id === state.selectedId) cls.push('selected');
+  return cls.join(' ');
+}
+
+function renderMarkers() {
+  state.markers.forEach((m) => m.remove());
+  state.markers.clear();
+  state.candidates.forEach((c) => {
+    const el = document.createElement('div');
+    el.className = markerClass(c);
+    el.style.background = TYPE_COLORS[c.type] || '#ccc';
+    el.title = `${TYPE_LABELS[c.type] || c.type} / score ${c.score ?? '-'}`;
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      select(c.id);
+    });
+    const marker = new maplibregl.Marker({ element: el })
+      .setLngLat([c.lon, c.lat])
+      .addTo(map);
+    state.markers.set(c.id, marker);
+  });
+}
+
+function refreshMarker(c) {
+  const m = state.markers.get(c.id);
+  if (!m) return;
+  m.getElement().className = markerClass(c);
+  m.setLngLat([c.lon, c.lat]);
+}
+
+function refreshAllMarkers() {
+  state.candidates.forEach(refreshMarker);
+}
+
+// ---------------------------------------------------------------------------
+// 選択・採否・時刻調整
+// ---------------------------------------------------------------------------
+function selected() {
+  return state.candidates.find((c) => c.id === state.selectedId) || null;
+}
+
+function select(id) {
+  state.selectedId = id;
+  refreshAllMarkers();
+  renderDetail();
+  const c = selected();
+  if (c) map.easeTo({ center: [c.lon, c.lat], duration: 300 });
+}
+
+function setStatus(status) {
+  const c = selected();
+  if (!c) return;
+  c._status = c._status === status ? 'pending' : status;
+  refreshMarker(c);
+  updateCounts();
+  renderDetail();
+}
+
+function shiftOffset(delta) {
+  const c = selected();
+  if (!c || c.frame_time_s === undefined) return;
+  const next = Math.round((c._offset + delta) * 2) / 2;
+  c._offset = Math.max(-PREVIEW_WINDOW_S, Math.min(PREVIEW_WINDOW_S, next));
+  renderDetail();
+}
+
+function offsetKey(off) {
+  const sign = off < 0 ? 'm' : 'p';
+  return sign + Math.abs(off).toFixed(1).replace('.', '_');
+}
+
+function previewUrl(c) {
+  if (!state.previews || c.frame_time_s === undefined) return null;
+  const entry = state.previews[c.id];
+  if (!entry) return null;
+  const file = offsetKey(c._offset) + '.jpg';
+  const known = entry.frames.some((f) => f.file === file);
+  if (!known) return null;
+  return state.previewBase + encodeURIComponent(c.id) + '/' + file;
+}
+
+// ---------------------------------------------------------------------------
+// 手動追加
+// ---------------------------------------------------------------------------
+function nearestTrackSample(lat, lon) {
+  if (!state.track || !state.track.samples) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const s of state.track.samples) {
+    if (s.suspect) continue;
+    const dLat = (s.lat - lat) * 111320;
+    const dLon = (s.lon - lon) * 111320 * Math.cos((lat * Math.PI) / 180);
+    const d = dLat * dLat + dLon * dLon;
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  return best ? { sample: best, distance_m: Math.sqrt(bestD) } : null;
+}
+
+function addManualPoint(lat, lon) {
+  state.manualSeq += 1;
+  const near = nearestTrackSample(lat, lon);
+  const c = {
+    id: 'manual-' + String(state.manualSeq).padStart(4, '0'),
+    type: 'manual',
+    lat, lon,
+    score: 1,
+    detail: {},
+    _status: 'adopted',
+    _offset: 0,
+    source: 'manual',
+  };
+  if (near) c._nearest_m = Math.round(near.distance_m);
+  // 遠すぎるサンプルを紐づけると、まったく違う場所のフレームが出題されてしまう。
+  // 別の山の track.json を読み込んでいる場合もここで弾かれる。
+  if (near && near.distance_m <= MANUAL_LINK_MAX_M) {
+    c.frame_time_s = near.sample.time_s;
+    c.media_id = near.sample.media_id;
+    c.heading_deg = near.sample.heading_deg;
+    c.heading_route_deg = near.sample.heading_route_deg;
+    c.route_distance_m = near.sample.route_distance_m;
+  }
+  state.candidates.push(c);
+  renderMarkers();
+  select(c.id);
+  updateCounts();
+}
+
+// ---------------------------------------------------------------------------
+// 表示
+// ---------------------------------------------------------------------------
+function updateCounts() {
+  const total = state.candidates.length;
+  const adopted = state.candidates.filter((c) => c._status === 'adopted').length;
+  const rejected = state.candidates.filter((c) => c._status === 'rejected').length;
+  const el = document.getElementById('counts');
+  el.innerHTML = total
+    ? `候補 <b>${total}</b> / 採用 <b>${adopted}</b> / 却下 <b>${rejected}</b>` +
+      (state.previews ? '' : ' <span style="color:var(--warn)">プレビュー未生成</span>')
+    : '未読み込み';
+  document.getElementById('exportBtn').disabled = adopted === 0;
+  document.getElementById('legend').innerHTML = Object.keys(TYPE_LABELS)
+    .map((t) => `<div><i style="background:${TYPE_COLORS[t]}"></i>${TYPE_LABELS[t]}</div>`)
+    .join('') +
+    '<div style="margin-top:4px;color:var(--muted)">破線＝low_quality</div>';
+}
+
+function fmt(v, digits = 1) {
+  return typeof v === 'number' ? v.toFixed(digits) : '—';
+}
+
+function renderDetail() {
+  const c = selected();
+  const detail = document.getElementById('detail');
+  const empty = document.getElementById('empty');
+  if (!c) {
+    detail.hidden = true;
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  detail.hidden = false;
+
+  const hasFrame = c.frame_time_s !== undefined;
+  const t = hasFrame ? c.frame_time_s + c._offset : null;
+  const url = previewUrl(c);
+  const statusLabel = { adopted: '採用', rejected: '却下', pending: '未判定' }[c._status];
+
+  const details = Object.entries(c.detail || {})
+    .filter(([k]) => k !== 'open_bearings')
+    .map(([k, v]) => `<dt>${k}</dt><dd>${Array.isArray(v) ? v.length + '件' : v}</dd>`)
+    .join('');
+
+  detail.innerHTML = `
+    <div class="row">
+      <span class="badge" style="background:${TYPE_COLORS[c.type] || '#ccc'}">
+        ${TYPE_LABELS[c.type] || c.type}</span>
+      <b>${c.id}</b>
+      <span style="color:var(--muted)">${statusLabel}</span>
+      ${c.low_quality ? '<span class="badge" style="background:var(--warn)">low_quality</span>' : ''}
+    </div>
+    <div class="row">
+      <button class="adopt" id="adoptBtn">採用 (A)</button>
+      <button class="reject" id="rejectBtn">却下 (R)</button>
+    </div>
+    ${hasFrame ? `
+      <div id="previewWrap">
+        ${url
+          ? `<img class="preview" src="${url}" alt="切り出しプレビュー">`
+          : `<div class="preview preview-missing">プレビュー画像がありません<br>
+             <code>extract_frames.py previews</code> を実行してください</div>`}
+      </div>
+      <div class="row">
+        <button id="prevBtn">←</button>
+        <span style="min-width:9rem;text-align:center">
+          ${fmt(t, 2)} 秒 <span style="color:var(--muted)">(${c._offset >= 0 ? '+' : ''}${fmt(c._offset, 1)})</span>
+        </span>
+        <button id="nextBtn">→</button>
+        <button id="resetBtn">±0に戻す</button>
+      </div>
+      <input type="range" id="offsetRange" min="${-PREVIEW_WINDOW_S}" max="${PREVIEW_WINDOW_S}"
+             step="${PREVIEW_STEP_S}" value="${c._offset}">
+    ` : `
+      <p class="hint">${c._nearest_m !== undefined && c._nearest_m > MANUAL_LINK_MAX_M
+        ? `最寄りのテレメトリが <b>${c._nearest_m} m</b> 先で、
+           紐づけ上限 ${MANUAL_LINK_MAX_M} m を超えています。
+           別の山の track.json を読み込んでいないか確認してください。<br>`
+        : ''}この候補は動画フレームを持ちません（GPXのみで検出、または手動追加）。
+      <b>モード②（3D地形）専用</b>の出題地点になります。</p>
+    `}
+    <dl class="kv">
+      <dt>緯度経度</dt><dd>${c.lat.toFixed(6)}, ${c.lon.toFixed(6)}</dd>
+      <dt>標高</dt><dd>${fmt(c.elevation_m)} m</dd>
+      <dt>経路長</dt><dd>${fmt(c.route_distance_m)} m</dd>
+      <dt>スコア</dt><dd>${fmt(c.score, 2)}</dd>
+      ${c.media_id ? `<dt>メディア</dt><dd>${c.media_id}</dd>` : ''}
+      ${c.heading_deg !== undefined ? `<dt>カメラ方位</dt><dd>${fmt(c.heading_deg)}°</dd>` : ''}
+      ${c.heading_route_deg !== undefined ? `<dt>進行方位</dt><dd>${fmt(c.heading_route_deg)}°</dd>` : ''}
+      ${c._nearest_m !== undefined ? `<dt>最寄りサンプル</dt><dd>${c._nearest_m} m</dd>` : ''}
+      ${details}
+    </dl>
+    <p class="hint">Shift+地図クリックで手動追加。A=採用 / R=却下 / ←→=時刻調整 / N=次の未判定</p>
+  `;
+
+  document.getElementById('adoptBtn').onclick = () => setStatus('adopted');
+  document.getElementById('rejectBtn').onclick = () => setStatus('rejected');
+  if (hasFrame) {
+    document.getElementById('prevBtn').onclick = () => shiftOffset(-PREVIEW_STEP_S);
+    document.getElementById('nextBtn').onclick = () => shiftOffset(PREVIEW_STEP_S);
+    document.getElementById('resetBtn').onclick = () => { c._offset = 0; renderDetail(); };
+    document.getElementById('offsetRange').oninput = (e) => {
+      c._offset = parseFloat(e.target.value);
+      renderDetail();
+    };
+  }
+}
+
+function selectNextPending() {
+  const idx = state.candidates.findIndex((c) => c.id === state.selectedId);
+  for (let i = 1; i <= state.candidates.length; i += 1) {
+    const c = state.candidates[(idx + i + state.candidates.length) % state.candidates.length];
+    if (c && c._status === 'pending') { select(c.id); return; }
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const key = e.key.toLowerCase();
+  if (key === 'a') { setStatus('adopted'); e.preventDefault(); }
+  else if (key === 'r') { setStatus('rejected'); e.preventDefault(); }
+  else if (key === 'n') { selectNextPending(); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { shiftOffset(-PREVIEW_STEP_S); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { shiftOffset(PREVIEW_STEP_S); e.preventDefault(); }
+});
+
+// ---------------------------------------------------------------------------
+// 書き出し
+// ---------------------------------------------------------------------------
+function buildConfirmed() {
+  const mountainId = document.getElementById('mountainId').value.trim();
+  const mountainName = document.getElementById('mountainName').value.trim();
+  if (!mountainId || !mountainName) {
+    alert('山IDと山名を入力してください');
+    return null;
+  }
+  const adopted = state.candidates
+    .filter((c) => c._status === 'adopted')
+    .sort((a, b) => (a.route_distance_m ?? 0) - (b.route_distance_m ?? 0));
+
+  const points = adopted.map((c, i) => {
+    const point = {
+      id: `${mountainId}-${String(i + 1).padStart(3, '0')}`,
+      type: c.type,
+      lat: Number(c.lat.toFixed(7)),
+      lon: Number(c.lon.toFixed(7)),
+      source: c.source === 'manual' || c.type === 'manual' ? 'manual' : 'auto',
+      candidate_id: c.id,
+    };
+    if (c.frame_time_s !== undefined) {
+      point.frame_time_s = Math.round((c.frame_time_s + c._offset) * 100) / 100;
+      if (c.media_id) point.media_id = c.media_id;
+    }
+    if (c.heading_deg !== undefined) point.heading_deg = c.heading_deg;
+    if (c.heading_route_deg !== undefined) point.heading_route_deg = c.heading_route_deg;
+    return point;
+  });
+
+  return {
+    mountain: { id: mountainId, name: mountainName },
+    generated_at: new Date().toISOString(),
+    points,
+  };
+}
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const data = buildConfirmed();
+  if (!data) return;
+  const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'confirmed_points.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// テストから叩けるように公開する
+window.__review = { state, buildConfirmed, addManualPoint, select, setStatus,
+                    shiftOffset, offsetKey, adoptCandidates, nearestTrackSample };
+
+updateCounts();
+autoLoad();
+</script>
+</body>
+</html>

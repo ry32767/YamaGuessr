@@ -1,0 +1,31 @@
+# 依存・ビルド成果物
+node_modules/
+dist/
+.vite/
+
+# 環境変数（実値は絶対にコミットしない）
+.env
+.env.local
+.env.*.local
+
+# 前処理の入力素材（動画・GPX原本）
+Source/
+*.gpx
+!pipeline/tests/fixtures/*.gpx
+
+# 前処理の中間生成物（telemetry / track / candidates / プレビュー画像）
+pipeline/data/
+!pipeline/data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,269 @@
+/** リセットと共通プリミティブ。値はすべて tokens.css から引く。 */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* iOS で横向きにしたときの文字サイズ自動調整を切る */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--c-ridge);
+  color: var(--c-snow);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: var(--lh-tight);
+  font-weight: 700;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--c-alt);
+}
+
+/* キーボードフォーカスは常に見える。outline を消して代替を用意しない、はしない。 */
+:focus-visible {
+  outline: var(--focus);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--r-sm);
+}
+
+/* --- 数値 -----------------------------------------------------------------
+   標高・距離・スコア・座標はすべて等幅で出す（DESIGN.md の書体上の署名）。 */
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* --- ボタン ---------------------------------------------------------------
+   1画面に primary は1つだけ。他は必ず secondary / ghost にする。 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: var(--tap);
+  padding: var(--s-2) var(--s-4);
+  border: var(--border);
+  border-radius: var(--r-md);
+  background: var(--c-dusk);
+  color: var(--c-snow);
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--c-mist);
+  border-color: var(--c-mist-hi);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--c-alt);
+  border-color: var(--c-alt);
+  color: var(--c-ridge);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: #f0b256;
+  border-color: #f0b256;
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  font-weight: 500;
+  color: var(--c-slate);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--c-dusk);
+  border-color: var(--c-mist);
+  color: var(--c-snow);
+}
+
+.btn--block {
+  width: 100%;
+}
+
+/* --- 入力欄 --------------------------------------------------------------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.field__label {
+  font-size: var(--fs-sm);
+  color: var(--c-slate);
+}
+
+.input {
+  min-height: var(--tap);
+  padding: var(--s-2) var(--s-3);
+  border: var(--border);
+  border-radius: var(--r-md);
+  background: var(--c-ridge);
+  color: var(--c-snow);
+  font: inherit;
+  /* 16px 未満にすると iOS で自動ズームが起きる */
+  font-size: var(--fs-base);
+}
+
+.input:focus-visible {
+  border-color: var(--c-alt);
+}
+
+.field__error {
+  font-size: var(--fs-sm);
+  color: var(--c-far);
+}
+
+/* --- 面 ------------------------------------------------------------------- */
+.panel {
+  background: var(--c-dusk);
+  border: var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s-4);
+}
+
+.muted {
+  color: var(--c-slate);
+}
+
+.tiny {
+  font-size: var(--fs-xs);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- 状態表示（loading / empty / error） ---------------------------------- */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-8) var(--s-4);
+  text-align: center;
+  color: var(--c-slate);
+  max-width: var(--panel-max);
+  margin: 0 auto;
+}
+
+.state__title {
+  color: var(--c-snow);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--c-mist);
+  border-top-color: var(--c-alt);
+  border-radius: var(--r-full);
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+}
+
+/* --- 地図（MapLibre）の上に乗るもの ---------------------------------------
+   出典表示は利用規約上の必須事項。消さない・隠さない。 */
+.maplibregl-ctrl-attrib {
+  font-size: var(--fs-xs);
+  background: rgba(16, 22, 31, 0.82) !important;
+  color: var(--c-snow);
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--c-alt);
+}
+
+.maplibregl-ctrl-scale {
+  background: rgba(16, 22, 31, 0.82);
+  border-color: var(--c-mist);
+  color: var(--c-snow);
+  font-family: var(--font-num);
+}
+
+/* MapLibre 既定の操作ボタンは 29px でタップ領域に足りない。44px に広げる。 */
+.maplibregl-ctrl-group button {
+  width: var(--tap);
+  height: var(--tap);
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top-color: rgba(0, 0, 0, 0.12);
+}
+
+/* 出典リンクは行内テキストだが、指で押せる程度の余白は確保する */
+.maplibregl-ctrl-attrib-inner a {
+  display: inline-block;
+  padding: var(--s-1) var(--s-1);
+}
