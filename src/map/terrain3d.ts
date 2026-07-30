@@ -510,7 +510,8 @@ export class Terrain3D {
       type: 'line',
       source: SOURCE_ROUTE,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#ffffff', 'line-width': width(1.8), 'line-opacity': 0.4 },
+      // 下地が空中写真（緑や岩の柄）なので、白のハローを敷かないと朱線が埋もれる
+      paint: { 'line-color': '#ffffff', 'line-width': width(1.8), 'line-opacity': 0.55 },
     });
     this.map.addLayer({
       id: LAYER_ROUTE,

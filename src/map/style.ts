@@ -20,6 +20,16 @@ const GSI_TILES = {
 const GSI_DEM_PNG = 'https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png';
 const DEM_MAX_ZOOM = 14;
 
+/**
+ * 全国最新写真（シームレス空中写真）。**モード②の3D地形のテクスチャに使う**。
+ *
+ * 地形図（標準地図・淡色地図）は山名・三角点・注記が焼き込まれていて答えが写るので使えない。
+ * 空中写真には注記が無く、しかも森・岩・登山道の質感が出るので、
+ * 陰影だけのときに真っ暗な面に見えていた近くの斜面まで読めるようになる。
+ */
+const GSI_PHOTO = 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg';
+const PHOTO_MAX_ZOOM = 18;
+
 /** 独自プロトコル名。addProtocol で terrain-RGB に変換して返す */
 const GSI_DEM_PROTOCOL = 'gsidem';
 
@@ -54,9 +64,10 @@ export const TERRAIN_SOURCE = 'dem';
 /**
  * モード②の3D地形スタイル。
  *
- * **地形図タイルをテクスチャとして貼らない。** 地形図には山名・三角点・注記が
+ * **テクスチャは空中写真。地形図タイルは貼らない。** 地形図には山名・三角点・注記が
  * 焼き込まれており、答えが画面に出てしまう（docs/spec.md 設計判断表）。
- * 描くのは陰影起伏（hillshade）と単色の地色だけ。
+ * 注記の無い空中写真なら答えは出ず、地形の質感が出るぶん一人称でも読みやすい。
+ * 写真の上に陰影起伏（hillshade）を薄く重ねて起伏を補う。
  *
  * `terrain` はスタイルに書かず、読み込み完了後に `map.setTerrain` で入れる。
  * スタイル定義に混ぜると、読み込みの途中でカメラを動かしたときに
@@ -73,21 +84,33 @@ export function terrainStyle(): StyleSpecification {
         maxzoom: DEM_MAX_ZOOM,
         attribution: GSI_ATTRIBUTION,
       },
+      photo: {
+        type: 'raster',
+        tiles: [GSI_PHOTO],
+        tileSize: 256,
+        maxzoom: PHOTO_MAX_ZOOM,
+        attribution: GSI_ATTRIBUTION,
+      },
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#233040' } },
+      {
+        id: 'photo',
+        type: 'raster',
+        source: 'photo',
+        // 切り替えのフェードは切る。寄り引きが激しいので、ちらつきの原因になる
+        paint: { 'raster-opacity': 1, 'raster-fade-duration': 0 },
+      },
       {
         id: 'hillshade',
         type: 'hillshade',
         source: 'dem',
         paint: {
-          // 暗くしすぎると尾根と谷の区別がつかない。実データで見て調整した値。
-          // 一人称では目の前の斜面が影側になることが多い。真っ黒だと面が読めないので、
-          // 影側は「暗いが面が見える」明るさまで持ち上げてある。
-          'hillshade-shadow-color': '#3f5060',
-          'hillshade-highlight-color': '#eef3f7',
+          // 写真の上に薄く重ねる。強くすると写真が濁って質感が消える
+          'hillshade-shadow-color': '#26313d',
+          'hillshade-highlight-color': '#f2f6fa',
           'hillshade-accent-color': '#7d8fa0',
-          'hillshade-exaggeration': 0.55,
+          'hillshade-exaggeration': 0.28,
         },
       },
     ],
