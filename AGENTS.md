@@ -45,10 +45,9 @@ python pipeline/match_gpx.py --gpx Source/route.gpx \
 python pipeline/detect_candidates.py --track pipeline/data/track.json \
   --video clip=Source/DJI_xxx.MP4 \
   --out pipeline/data/candidates.json                # --gpx だけでも実行可（3D専用地点）
-python pipeline/import_photos.py --gpx Source/route.gpx \
-  --photos-dir Source/photos --mountain-id X --mountain-name Y \
-  --out pipeline/data/confirmed_points.json \
-  --images-out pipeline/data/frames                  # 写真だけで地点を作る経路
+python pipeline/build_library.py \
+  --video clip=Source/DJI_xxx.MP4 --photos-dir Source/photos \
+  --out-dir pipeline/data/library                    # 動画・写真→画像ライブラリ（位置は推定しない）
 python pipeline/extract_frames.py previews \
   --candidates pipeline/data/candidates.json \
   --video clip=Source/DJI_xxx.MP4 --out-dir pipeline/data/previews

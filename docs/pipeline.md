@@ -167,6 +167,8 @@ python pipeline/studio.py          # http://127.0.0.1:8770
 
 **127.0.0.1 にだけ待ち受ける**。GitHub Pagesに配信されるのは`public/`だけなので、このツールが公開されることはない。
 
+ゲームをlocalhostで開いているときは、ホーム画面にもこのツールへのリンクが出る（`src/app.ts`の`isLocalhost()`で判定。公開先では出ない）。ポートは`8770`固定で、変えるときは`--port`とリンク側（`STUDIO_URL`）の両方を直す。
+
 動画が無くGPXだけで3D専用地点を作るときは、レビューを省いて候補を一括採用する近道も使える。
 
 ```bash
@@ -175,23 +177,22 @@ python pipeline/adopt_candidates.py --candidates pipeline/data/candidates.json \
   --out pipeline/data/confirmed_points.json
 ```
 
-## 5b. `import_photos.py`（写真から地点を作る）
+## 5b. `build_library.py`（画像ライブラリを作る）
 
-スマホで撮った写真をそのまま出題地点にする。動画の工程（1〜5）とは独立していて、**GPXと写真だけあれば動く**。
+動画と写真を**ただの画像の一覧**にする。位置は一切推定しない（[spec.md](spec.md)の設計判断表）。どの画像をどの地点に使うかは`review.html`で人が選ぶ。
 
 ```bash
-python pipeline/import_photos.py --gpx Source/route.gpx \
-  --photos-dir Source/photos \
-  --mountain-id odaigahara-2026-06-11 --mountain-name "大台ヶ原・日出ヶ岳" \
-  --out pipeline/data/confirmed_points.json --images-out pipeline/data/frames
+python pipeline/build_library.py \
+  --video clip=Source/DJI_xxx.MP4 --photos-dir Source/photos \
+  --out-dir pipeline/data/library
 ```
 
-- 位置は **EXIFの撮影日時をGPXに突き合わせて** 決める。写真のGPSは使わない（GPXの方が精度も一貫性も高い。設計判断は[spec.md](spec.md)）
-- EXIFにUTCオフセットが無ければ`--tz`（既定 +09:00）を使う。カメラの時計がずれていれば`--time-offset-s`で補正する
-- GPXの時刻範囲から300秒以上外れた写真は**採用せず理由を出す**（別の山行の写真が紛れても違う場所の地点を作らない）
-- 画像は長辺1280pxのWebP・200KB以下・メタデータ全除去。ファイル名は`{point_id}.webp`
+- 動画は一定間隔（`--interval-s`、既定2秒）で切り出す。ライブラリの画像は長辺480pxのサムネイル（選ぶためだけの画像なので軽くする）
+- 写真はEXIFの撮影日時を**並び順にだけ**使う（位置には使わない）。日時が無くてもファイル名順で並ぶ
+- `index.json`に`{id, kind: 'video_frame'|'photo', media_id, source_path, time_s|taken_local, file}`を書く。**出題用の画像はここからではなく、毎回原本（動画・写真）から作り直す**
+- 実行するたびに出力先を作り直す（前回の残骸が混ざらないように）
 - **HEIC/HEIFは読めない**。iPhoneの写真はJPEGに変換してから置く
-- EXIFの読み取りは`pipeline/exif.py`。撮影日時・UTCオフセット・GPS・向きだけを読む最小実装で、画像ライブラリには依存しない
+- EXIFの読み取りは`pipeline/exif.py`。撮影日時・UTCオフセット・GPS・向きだけを読む最小実装
 
 ## 6. `build_quiz_data.py`
 - `confirmed_points.json`をMountain/Point構造（[data-model.md](data-model.md)参照）に変換。**公開JSONに出すのはスナップ後座標のみ**（生GPS・snap_distance・品質スコアは中間ファイルに留める）

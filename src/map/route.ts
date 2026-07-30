@@ -1,121 +1,150 @@
 /**
- * GPXトラックの切り出し。
+ * GPXトラックの上を歩くための計算。
  *
- * 3Dビューには**出題地点のすぐ足元のぶんだけ**を描く。ルート全体を出すと
- * どこを歩いているかが一目で分かってしまうため、進む向きが読める最小限に絞る。
+ * 3Dビューは「ルート上に立って見回す」一人称なので、現在地は
+ * **トラック起点からの累積距離 [m]** ひとつで表せる。前後に歩く・近い場所へ飛ぶ・
+ * 進行方位を知る、の3つができればよい。
+ *
+ * 距離は局所平面（等距円筒）で計算する。1本のトラックは長くても数十kmなので、
+ * 歩幅の計算には十分な精度が出る（誤差は0.1%以下）。
  */
 import type { LatLng } from '../scoring';
 import type { TrackFeature } from '../types';
 
-/** 3Dビューに描くルートの半径 [m]（この距離ぶん前後を描く） */
-export const LOCAL_ROUTE_RADIUS_M = 10;
-
 const M_PER_DEG_LAT = 111_320;
 
-function metersPerDegLon(lat: number): number {
-  return M_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180);
+/** トラック上の位置。`offsetM` は問い合わせた点からトラックまでの距離 */
+export interface RouteAnchor {
+  alongM: number;
+  offsetM: number;
 }
 
-interface Projected {
-  x: number;
-  y: number;
+/** 角度差を -180〜180 に正規化する。 */
+export function angleDiffDeg(a: number, b: number): number {
+  return ((((a - b) % 360) + 540) % 360) - 180;
 }
 
-/** 線分上で点に最も近い位置を、0〜1のパラメータで返す。 */
-function closestT(a: Projected, b: Projected, p: Projected): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return 0;
-  return Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-}
+export class RoutePath {
+  /** 頂点の平面座標 [m]（トラック先頭を原点とする） */
+  private readonly xs: number[] = [];
+  private readonly ys: number[] = [];
+  /** 各頂点までの累積距離 [m] */
+  private readonly cum: number[] = [];
+  private readonly originLat: number;
+  private readonly originLon: number;
+  private readonly mPerLon: number;
 
-/**
- * トラックのうち、`center` から経路上で `radiusM` 以内の部分だけを取り出す。
- *
- * 途中で切れた端は線分を補間して、ちょうど半径のところで止める。
- * 対象が無ければ null（＝描かない）。
- */
-export function localRouteSegment(
-  track: TrackFeature,
-  center: LatLng,
-  radiusM: number = LOCAL_ROUTE_RADIUS_M,
-): TrackFeature | null {
-  const coords = track.geometry.coordinates;
-  if (coords.length < 2) return null;
-
-  const mPerLon = metersPerDegLon(center.lat);
-  const project = (lon: number, lat: number): Projected => ({
-    x: (lon - center.lon) * mPerLon,
-    y: (lat - center.lat) * M_PER_DEG_LAT,
-  });
-  const origin: Projected = { x: 0, y: 0 };
-
-  // 各頂点までの累積距離と、地点に最も近い経路位置を求める
-  const points = coords.map(([lon, lat]) => project(lon, lat));
-  const cumulative: number[] = [0];
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1];
-    const b = points[i];
-    if (!a || !b) break;
-    cumulative.push((cumulative[i - 1] ?? 0) + Math.hypot(b.x - a.x, b.y - a.y));
-  }
-
-  let bestDist = Infinity;
-  let bestAlong = 0;
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const a = points[i];
-    const b = points[i + 1];
-    const base = cumulative[i];
-    if (!a || !b || base === undefined) continue;
-    const t = closestT(a, b, origin);
-    const cx = a.x + t * (b.x - a.x);
-    const cy = a.y + t * (b.y - a.y);
-    const d = Math.hypot(cx, cy);
-    if (d < bestDist) {
-      bestDist = d;
-      bestAlong = base + Math.hypot(cx - a.x, cy - a.y);
+  private constructor(coords: readonly (readonly [number, number])[]) {
+    const first = coords[0] as readonly [number, number];
+    this.originLon = first[0];
+    this.originLat = first[1];
+    this.mPerLon = M_PER_DEG_LAT * Math.cos((this.originLat * Math.PI) / 180);
+    for (const [lon, lat] of coords) {
+      this.xs.push((lon - this.originLon) * this.mPerLon);
+      this.ys.push((lat - this.originLat) * M_PER_DEG_LAT);
+    }
+    this.cum.push(0);
+    for (let i = 1; i < this.xs.length; i += 1) {
+      const dx = (this.xs[i] ?? 0) - (this.xs[i - 1] ?? 0);
+      const dy = (this.ys[i] ?? 0) - (this.ys[i - 1] ?? 0);
+      this.cum.push((this.cum[i - 1] ?? 0) + Math.hypot(dx, dy));
     }
   }
 
-  const from = bestAlong - radiusM;
-  const to = bestAlong + radiusM;
-  const out: [number, number][] = [];
-
-  const pointAt = (along: number): [number, number] | null => {
-    const total = cumulative[cumulative.length - 1] ?? 0;
-    const clamped = Math.max(0, Math.min(total, along));
-    for (let i = 0; i < cumulative.length - 1; i += 1) {
-      const start = cumulative[i];
-      const end = cumulative[i + 1];
-      if (start === undefined || end === undefined) continue;
-      if (clamped > end) continue;
-      const span = end - start;
-      const t = span === 0 ? 0 : (clamped - start) / span;
-      const a = coords[i];
-      const b = coords[i + 1];
-      if (!a || !b) return null;
-      return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
-    }
-    const last = coords[coords.length - 1];
-    return last ? [last[0], last[1]] : null;
-  };
-
-  const start = pointAt(from);
-  if (start) out.push(start);
-  for (let i = 0; i < coords.length; i += 1) {
-    const along = cumulative[i];
-    const coord = coords[i];
-    if (along === undefined || !coord) continue;
-    if (along > from && along < to) out.push([coord[0], coord[1]]);
+  /** 点が2つ以上あるトラックからだけ作れる。それ以外は null（＝歩けない）。 */
+  static from(track: TrackFeature | null | undefined): RoutePath | null {
+    const coords = track?.geometry.coordinates;
+    if (!coords || coords.length < 2) return null;
+    return new RoutePath(coords);
   }
-  const end = pointAt(to);
-  if (end) out.push(end);
 
-  if (out.length < 2) return null;
-  return {
-    type: 'Feature',
-    properties: { local: true },
-    geometry: { type: 'LineString', coordinates: out },
-  };
+  /** トラック全長 [m] */
+  get totalM(): number {
+    return this.cum[this.cum.length - 1] ?? 0;
+  }
+
+  /** 起点から `alongM` の位置の座標。範囲外は端に丸める。 */
+  positionAt(alongM: number): LatLng {
+    const target = Math.max(0, Math.min(this.totalM, alongM));
+    const i = this.segmentIndex(target);
+    const start = this.cum[i] ?? 0;
+    const end = this.cum[i + 1] ?? start;
+    const span = end - start;
+    const t = span === 0 ? 0 : (target - start) / span;
+    const x = (this.xs[i] ?? 0) + t * ((this.xs[i + 1] ?? 0) - (this.xs[i] ?? 0));
+    const y = (this.ys[i] ?? 0) + t * ((this.ys[i + 1] ?? 0) - (this.ys[i] ?? 0));
+    return this.toLatLng(x, y);
+  }
+
+  /**
+   * その位置での進行方位 [deg]（真北基準・時計回り）。
+   * 1本の線分だけを見ると細かい蛇行を拾うので、前後 `spanM` の弦で求める。
+   */
+  bearingAt(alongM: number, spanM = 20): number {
+    const half = spanM / 2;
+    const a = this.planeAt(Math.max(0, alongM - half));
+    const b = this.planeAt(Math.min(this.totalM, alongM + half));
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (dx === 0 && dy === 0) return 0;
+    return (((Math.atan2(dx, dy) * 180) / Math.PI) + 360) % 360;
+  }
+
+  /** 点に最も近いトラック上の位置。 */
+  anchorFor(p: LatLng): RouteAnchor {
+    const px = (p.lon - this.originLon) * this.mPerLon;
+    const py = (p.lat - this.originLat) * M_PER_DEG_LAT;
+    let bestOffset = Infinity;
+    let bestAlong = 0;
+    for (let i = 0; i < this.xs.length - 1; i += 1) {
+      const ax = this.xs[i] ?? 0;
+      const ay = this.ys[i] ?? 0;
+      const bx = this.xs[i + 1] ?? 0;
+      const by = this.ys[i + 1] ?? 0;
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+      const cx = ax + t * dx;
+      const cy = ay + t * dy;
+      const offset = Math.hypot(px - cx, py - cy);
+      if (offset < bestOffset) {
+        bestOffset = offset;
+        bestAlong = (this.cum[i] ?? 0) + Math.hypot(cx - ax, cy - ay);
+      }
+    }
+    return { alongM: bestAlong, offsetM: bestOffset };
+  }
+
+  private planeAt(alongM: number): { x: number; y: number } {
+    const target = Math.max(0, Math.min(this.totalM, alongM));
+    const i = this.segmentIndex(target);
+    const start = this.cum[i] ?? 0;
+    const end = this.cum[i + 1] ?? start;
+    const span = end - start;
+    const t = span === 0 ? 0 : (target - start) / span;
+    return {
+      x: (this.xs[i] ?? 0) + t * ((this.xs[i + 1] ?? 0) - (this.xs[i] ?? 0)),
+      y: (this.ys[i] ?? 0) + t * ((this.ys[i + 1] ?? 0) - (this.ys[i] ?? 0)),
+    };
+  }
+
+  /** `alongM` を含む線分の番号。 */
+  private segmentIndex(alongM: number): number {
+    let lo = 0;
+    let hi = this.cum.length - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if ((this.cum[mid] ?? 0) <= alongM) lo = mid;
+      else hi = mid;
+    }
+    return Math.min(lo, this.xs.length - 2);
+  }
+
+  private toLatLng(x: number, y: number): LatLng {
+    return {
+      lat: this.originLat + y / M_PER_DEG_LAT,
+      lon: this.originLon + x / this.mPerLon,
+    };
+  }
 }

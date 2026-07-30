@@ -45,7 +45,7 @@ YamaGuessr/
 │   ├── match_gpx.py           # テレメトリ×GPX→track.json
 │   ├── detect_candidates.py   # 出題候補の自動検出
 │   ├── adopt_candidates.py    # 候補の一括採用（レビュー省略の近道）
-│   ├── import_photos.py       # 写真→出題地点（EXIFの撮影時刻でGPX照合）
+│   ├── build_library.py       # 動画・写真→画像ライブラリ（位置は推定しない）
 │   ├── exif.py                # EXIF読み取り（外部依存なし）
 │   ├── dem.py                 # 国土地理院の標高タイル
 │   ├── frame_quality.py       # フレームのブレ・明るさ判定
@@ -92,7 +92,8 @@ pip install -r pipeline/requirements.txt
 6. リーダーボードで順位を確認
 
 - 地形図には**歩いたGPXルートが重ねて描かれます**。「このルートのどこか」を当てる問題です
-- 3D地形当ては**その地点に立った一人称視点**です。ドラッグで360度見回せて、画面には方位と標高が出ます
+- 3D地形当ては**その地点に立った一人称視点**（目線は地面から1.5m）です。ドラッグで360度見回せ、Googleストリートビューのように**ルートの上を前後に歩けます**（ボタン・矢印キー・ルートのタップ）。上空から見下ろす俯瞰にはなりません
+- 歩いても**正解は出発地点**です。離れている間は「出発地点から○m」が出て、「出発地点」ボタンで戻れます
 - 動画のフレームが無い地点は、**3D地形当てモード専用**として出題されます。GPXとDEMさえあれば出題できるので、出題数が動画の量に縛られません
 
 ## 出題データを作る（開発者向け）
@@ -103,50 +104,42 @@ pip install -r pipeline/requirements.txt
 python pipeline/studio.py
 ```
 
-ブラウザが開いたら、**GPX・写真・動画をその画面から追加**して、工程を上から順に「実行」します。127.0.0.1にだけ待ち受けるので、このツールが外に公開されることはありません。
+ブラウザが開いたら、**GPX・写真・動画をその画面から追加**して、工程を上から順に「実行」します。127.0.0.1にだけ待ち受けるので、このツールが外に公開されることはありません。ローカルで開発サーバを動かしているときは、ゲームのホーム画面にもこのツールへのリンクが出ます（公開先には出ません）。
 
-作り方は3通りあります。
+作り方は2通りあります。
 
 | 素材 | 手順 | 出来るもの |
 |---|---|---|
-| GPX＋スマホの写真 | 写真の取り込み → 出題データ生成 | 写真を見て当てる地点 |
-| GPX＋動画 | テレメトリ抽出 → GPX照合 → 候補検出 → プレビュー → レビュー → 画像切り出し → 出題データ生成 | 動画のワンシーンで当てる地点 |
+| GPX＋動画／写真 | 候補検出 → 画像ライブラリ → レビューで画像を割り当て → 画像切り出し → 出題データ生成 | 写真やワンシーンを見て当てる地点 |
 | GPXだけ | 候補検出 → 候補を全採用 → 出題データ生成 | 3D地形だけで当てる地点 |
 
-写真はEXIFの撮影日時をGPXに突き合わせて位置を決めます（写真のGPSより正確なため）。**iPhoneのHEICは読めない**ので、JPEGに変換してから入れてください。
+**出題地点はGPXの形と地形から決め、画像はレビューで人が割り当てます**（GPXの時刻も写真の撮影時刻も位置の根拠には使いません。理由は[docs/spec.md](docs/spec.md)の設計判断表）。1地点に何枚でも割り当てられます。**iPhoneのHEICは読めない**ので、JPEGに変換してから入れてください。
 
 <details>
 <summary>コマンドで1つずつ実行する場合</summary>
 
 ```bash
-# 1. 動画からテレメトリを抽出（タイムラプス倍率・GPSの健全性もここで分かる）
-python pipeline/extract_telemetry.py Source/DJI_xxx.MP4 \
-  -o pipeline/data/telemetry.csv --json pipeline/data/telemetry.json \
-  --summary pipeline/data/telemetry_summary.json
+# 1. 出題地点の候補を探す（GPXの形＋地形から。動画は品質判定に使うだけで任意）
+python pipeline/detect_candidates.py --gpx Source/route.gpx \
+  --out pipeline/data/candidates.json
 
-# 2. GPXに突き合わせる（分割動画は --telemetry を複数回）
-python pipeline/match_gpx.py --gpx Source/route.gpx \
-  --telemetry pipeline/data/telemetry.json --out pipeline/data/track.json
+# 2. 動画と写真から画像ライブラリを作る（位置は推定しない）
+python pipeline/build_library.py --video clip=Source/DJI_xxx.MP4 \
+  --photos-dir Source/photos --out-dir pipeline/data/library
 
-# 3. 候補地点を検出（--gpx だけでも実行でき、その場合は3D専用地点になる）
-python pipeline/detect_candidates.py --track pipeline/data/track.json \
-  --video clip=Source/DJI_xxx.MP4 --out pipeline/data/candidates.json
-
-# 4. レビュー用プレビューを生成し、review.html で採否と時刻を決める
-python pipeline/extract_frames.py previews --candidates pipeline/data/candidates.json \
-  --video clip=Source/DJI_xxx.MP4 --out-dir pipeline/data/previews
+# 3. レビューで地点に画像を割り当てる（ここが本番。1地点に何枚でも）
 python -m http.server   # ルートで起動し /pipeline/review.html を開く
 
-# 5. 確定した時刻から本番画像を切り出す
+# 4. 割り当てた画像を原本から出題用に書き出す
 python pipeline/extract_frames.py final --confirmed pipeline/data/confirmed_points.json \
   --video clip=Source/DJI_xxx.MP4 --out-dir pipeline/data/frames
 
-# 6. 公開用 quiz_points.json とトラックを作る（既存の山はマージされる）
+# 5. 公開用 quiz_points.json とトラックを作る（既存の山はマージされる）
 python pipeline/build_quiz_data.py --confirmed pipeline/data/confirmed_points.json \
   --gpx Source/route.gpx --images-dir pipeline/data/frames --public-dir public
 ```
 
-動画が無く、3D専用の出題地点だけ作る場合は 3 → 一括採用 → 6 だけで済みます。
+画像を使わず3D地形だけで出題する場合は 1 → 一括採用 → 5 だけで済みます。
 
 ```bash
 python pipeline/detect_candidates.py --gpx Source/route.gpx --out pipeline/data/candidates.json

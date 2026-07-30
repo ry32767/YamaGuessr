@@ -359,7 +359,16 @@
   color: var(--c-slate);
 }
 
-/* 3Dビューの向きを一発で変えるボタン。地図を覆う面積は最小に保つ */
+/* 出発地点から歩いた距離。回答の正解は出発地点なので、離れたことが分かるように */
+.terrain-hud__moved {
+  color: var(--c-alt);
+}
+
+.terrain-hud__note {
+  color: var(--c-snow);
+}
+
+/* 3Dビューでルート上を移動するボタン。地図を覆う面積は最小に保つ */
 /* 出典表示（右下）に重ねないよう左下に置く。出典を隠さないのは不変条件 */
 .terrain-controls {
   position: absolute;
@@ -388,6 +397,12 @@
   background: var(--c-mist);
 }
 
+/* 歩けないとき（ルート未登録・出発地点にいる）は押せないことを形でも示す */
+.terrain-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* 選択中は色だけでなく枠と太字でも示す */
 .terrain-btn[aria-pressed='true'] {
   background: var(--c-alt);
@@ -410,6 +425,25 @@
   font-size: var(--fs-xs);
   pointer-events: none;
   white-space: nowrap;
+}
+
+/* 狭い画面では帯が2つ横に並ばない。操作の説明は移動ボタンの上に落とす */
+@media (max-width: 560px) {
+  .terrain-hud {
+    flex-wrap: wrap;
+    white-space: normal;
+    max-width: calc(100% - var(--s-4));
+    row-gap: 0;
+  }
+
+  .terrain-legend {
+    top: auto;
+    right: auto;
+    bottom: calc(var(--s-2) + var(--tap) + var(--s-1));
+    left: var(--s-2);
+    max-width: calc(100% - var(--s-4));
+    white-space: normal;
+  }
 }
 
 .quiz__answer {

@@ -82,7 +82,9 @@ export function terrainStyle(): StyleSpecification {
         source: 'dem',
         paint: {
           // 暗くしすぎると尾根と谷の区別がつかない。実データで見て調整した値。
-          'hillshade-shadow-color': '#31414f',
+          // 一人称では目の前の斜面が影側になることが多い。真っ黒だと面が読めないので、
+          // 影側は「暗いが面が見える」明るさまで持ち上げてある。
+          'hillshade-shadow-color': '#3f5060',
           'hillshade-highlight-color': '#eef3f7',
           'hillshade-accent-color': '#7d8fa0',
           'hillshade-exaggeration': 0.55,

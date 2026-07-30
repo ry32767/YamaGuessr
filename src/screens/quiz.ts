@@ -12,7 +12,7 @@ import {
   type MapView,
 } from '../data';
 import { AnswerMap } from '../map/answerMap';
-import { PRESETS, Terrain3D, type ViewPreset } from '../map/terrain3d';
+import { STEP_M, Terrain3D, type WalkState } from '../map/terrain3d';
 import { formatRadius, visibleRadii } from '../map/rings';
 import { CORRECT_THRESHOLD, play, playForScore } from '../sound';
 import type { Answer, QuizSession } from '../session';
@@ -64,50 +64,50 @@ export function createQuizScreen(
   if (session.viewMode === 'terrain3d') {
     terrainHost = el('div', { class: 'quiz__terrain' });
     append(media, terrainHost);
-    const presetButtons = new Map<ViewPreset, HTMLButtonElement>();
-    const syncPresetButtons = (active: ViewPreset): void => {
-      for (const [key, button] of presetButtons) {
-        button.setAttribute('aria-pressed', String(key === active));
-      }
+
+    // ルート上を歩く操作。ストリートビューと同じで、向いている方へ進む
+    const back = el(
+      'button',
+      { class: 'terrain-btn', type: 'button', title: `${STEP_M}m 後ろへ` },
+      '◀ 戻る',
+    ) as HTMLButtonElement;
+    const forward = el(
+      'button',
+      { class: 'terrain-btn', type: 'button', title: `見ている向きへ ${STEP_M}m` },
+      '進む ▶',
+    ) as HTMLButtonElement;
+    const home = el(
+      'button',
+      { class: 'terrain-btn', type: 'button', title: '出発地点に戻る' },
+      '出発地点',
+    ) as HTMLButtonElement;
+
+    const syncWalk = (state: WalkState): void => {
+      for (const button of [back, forward]) button.disabled = !state.canWalk;
+      home.disabled = !state.canWalk || state.movedM < 1;
     };
 
     terrain = new Terrain3D(terrainHost, {
       center: { lat: first.lat, lon: first.lon },
       headingDeg: initialHeading(first),
       groundElevationM: first.elevation_m,
-      onPresetChange: syncPresetButtons,
+      onWalk: syncWalk,
     });
 
-    // 視点モードの切り替えと、「自分がどこに立っているか」の確認
     const view = terrain;
-    const controls = el('div', { class: 'terrain-controls', role: 'group', 'aria-label': '視点' });
-    for (const key of ['first_person', 'overhead'] as ViewPreset[]) {
-      const preset = PRESETS[key];
-      const button = el(
-        'button',
-        {
-          class: 'terrain-btn',
-          type: 'button',
-          'aria-pressed': String(key === view.currentPreset()),
-          title: preset.hint,
-        },
-        preset.label,
-      ) as HTMLButtonElement;
-      button.addEventListener('click', () => view.setPreset(key));
-      presetButtons.set(key, button);
-      append(controls, button);
-    }
-    const down = el('button', { class: 'terrain-btn', type: 'button' }, '真下');
-    down.addEventListener('click', () => {
-      view.lookDown();
-      syncPresetButtons(view.currentPreset());
-    });
-    append(controls, down);
-    append(terrainHost, controls);
-    append(
-      terrainHost,
-      el('p', { class: 'terrain-legend' }, Terrain3D.routeLegend()),
+    forward.addEventListener('click', () => view.walk(STEP_M));
+    back.addEventListener('click', () => view.walk(-STEP_M));
+    home.addEventListener('click', () => view.returnToStart());
+    const controls = el(
+      'div',
+      { class: 'terrain-controls', role: 'group', 'aria-label': 'ルート上の移動' },
+      back,
+      forward,
+      home,
     );
+    append(terrainHost, controls);
+    append(terrainHost, el('p', { class: 'terrain-legend' }, Terrain3D.routeLegend()));
+    syncWalk(view.walkState());
   }
 
   const photo = el('img', {

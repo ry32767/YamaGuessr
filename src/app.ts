@@ -61,6 +61,20 @@ const VIEW_CHOICES: Choice<ViewMode>[] = [
   },
 ];
 
+/** 出題データ追加UI（`python pipeline/studio.py`）の待ち受け先。ローカル専用 */
+const STUDIO_URL = 'http://127.0.0.1:8770/';
+
+/**
+ * ローカルで開いているか。
+ *
+ * studioへの導線はローカルのときだけ出す。studio自体は127.0.0.1にしか
+ * 待ち受けないので公開先から辿れないが、リンクを出す意味も無い。
+ */
+function isLocalhost(): boolean {
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+}
+
 const TYPE_LABELS: Record<string, string> = {
   peak: 'ピーク',
   col: 'コル',
@@ -255,6 +269,8 @@ class App {
       append(home, board);
     }
 
+    if (isLocalhost()) append(home, this.studioCard());
+
     append(
       home,
       el(
@@ -353,6 +369,29 @@ class App {
     }
     append(group, list);
     return group;
+  }
+
+  /**
+   * 出題データ追加UI（studio）への導線。**ローカルで開いたときだけ**出す。
+   * GPX・動画・写真を放り込んで出題地点を作る作業はローカルでしかできない。
+   */
+  private studioCard(): HTMLElement {
+    const link = el(
+      'a',
+      { class: 'btn btn--ghost btn--block', href: STUDIO_URL, target: '_blank', rel: 'noopener' },
+      '出題データを追加する（studio）',
+    );
+    return el(
+      'div',
+      { class: 'panel stack' },
+      el('b', {}, 'ローカル開発用'),
+      link,
+      el(
+        'p',
+        { class: 'muted tiny' },
+        `開いていないときは \`python pipeline/studio.py\` で起動します（${STUDIO_URL} 固定・ローカル専用）。`,
+      ),
+    );
   }
 
   private resumeCard(progress: Progress, data: QuizData): HTMLElement {

@@ -1,18 +1,26 @@
 /**
  * モード②の3D地形ビュー（機能G）。
  *
- * **出題地点を軸に、向きだけを変える。** カメラは常に出題地点を注視しているので、
- * ドラッグしても立ち位置は1mmも動かない。真下を向けば自分がいる地点が画面の
- * 真ん中に見える。上空から地点を眺める形だと「自分がどこに立っているか」が
- * 伝わらないため、既定はほぼ水平の見回しにしてある。
+ * **ルートに立って見回し、ルートの上を歩く。** Googleストリートビューと同じ操作感で、
+ * カメラは実際に地面＋目線の高さ（[eye.ts](eye.ts) の `EYE_HEIGHT_M`）に置く。
+ * 見下ろし角には上限があり、**俯瞰（上空から見下ろす画）にはならない**。
+ * 上から見せると「自分がどこに立っているか」が伝わらないため（DESIGN.md 不変条件2b）。
+ *
+ * ルートは全体を描く。ただし一人称なので、尾根の裏に回ったぶんは地形に隠れて見えない。
  *
  * **地形図タイルを地形テクスチャに使わない。** 山名・三角点・注記が焼き込まれており、
  * 答えが画面に表示されてしまう（docs/spec.md 設計判断表）。描くのは陰影起伏だけ。
  */
-import maplibregl, { Map as MapLibreMap } from 'maplibre-gl';
+import maplibregl, { LngLat, Map as MapLibreMap, type CameraOptions } from 'maplibre-gl';
 import type { LatLng } from '../scoring';
 import type { TrackFeature } from '../types';
-import { LOCAL_ROUTE_RADIUS_M, localRouteSegment } from './route';
+import {
+  EYE_HEIGHT_M,
+  MAX_DOWN_DEG,
+  MIN_DOWN_DEG,
+  aimAtTerrain,
+} from './eye';
+import { RoutePath, angleDiffDeg } from './route';
 import {
   GSI_ATTRIBUTION,
   TERRAIN_EXAGGERATION,
@@ -21,72 +29,65 @@ import {
   terrainStyle,
 } from './style';
 
-/** 視点モード */
-export type ViewPreset = 'first_person' | 'overhead';
-
-interface Preset {
-  label: string;
-  pitch: number;
-  zoom: number;
-  hint: string;
-}
-
+/** 1回の操作で歩く距離 [m]。ストリートビューの1歩ぶんの感覚に合わせた */
+export const STEP_M = 25;
+/** Shiftを押しながら／長押しで歩く距離 [m] */
+export const LONG_STEP_M = 100;
+/** タップした場所からこの距離までルートがあれば、そこへ移動する */
+const TAP_SNAP_M = 60;
+/** 出発地点の印を出し始める移動距離 [m]（足元にあるうちは出さない） */
+const START_MARKER_AFTER_M = 15;
 /**
- * 視点モードの設定。どちらも中心は出題地点のままなので、
- * 切り替えても立ち位置は変わらない。
- */
-export const PRESETS: Record<ViewPreset, Preset> = {
-  first_person: {
-    label: '一人称',
-    // 立っているように見せるには、地点のすぐそばまでカメラを寄せる必要がある
-    pitch: 84,
-    zoom: 17.4,
-    hint: 'その場に立って見回している視点',
-  },
-  overhead: {
-    label: '俯瞰',
-    pitch: 52,
-    zoom: 14.2,
-    hint: '斜め上から地形の広がりを見る',
-  },
-};
-
-const SOURCE_ROUTE = 'yg-local-route';
-const LAYER_ROUTE_HALO = 'yg-local-route-halo';
-const LAYER_ROUTE = 'yg-local-route-line';
-
-/**
- * 俯角 [deg]。MapLibre の pitch と同じ定義で、
- * 0 = 真下を見下ろす（自分の地点が画面中央）、85 = ほぼ水平。
- */
-const MIN_PITCH = 0;
-const MAX_PITCH = 85;
-/**
- * 寄り引きの範囲。地点からどれくらい離れて見るか。
+ * 地形が落ち着くまで視点を解き直す回数。
  *
- * MapLibre のカメラは「中心（＝出題地点）からズームで決まる距離」に置かれる。
- * 一人称らしくするには相当寄せる必要があるので、上限を大きめに取っている。
+ * 標高タイルは少しずつ届くので、届くたびに地形の形が変わる。読み込み途中の形で
+ * 決めた視点は的を外していることがあるため、何度か解き直す。
+ * 解き直しても答えが変わらなければ何もしない（`sameAsCurrent`）ので、そこで止まる。
  */
-const MIN_ZOOM = 13;
-const MAX_ZOOM = 19;
-/** ドラッグ量に対する回転の感度 */
-const YAW_PER_PX = 0.25;
-const PITCH_PER_PX = 0.2;
+const SETTLE_APPLIES = 8;
 
-const SOURCE_HERE = 'yg-here';
-const LAYER_HERE = 'yg-here-circle';
-const LAYER_HERE_RING = 'yg-here-ring';
+/** ドラッグ量に対する感度 */
+const YAW_PER_PX = 0.25;
+const DOWN_PER_PX = 0.12;
+/** これ未満の動きはタップ扱い（見回しではない） */
+const TAP_SLOP_PX = 6;
+
+const SOURCE_ROUTE = 'yg-route';
+const LAYER_ROUTE_HALO = 'yg-route-halo';
+const LAYER_ROUTE = 'yg-route-line';
+const SOURCE_START = 'yg-start';
+const LAYER_START = 'yg-start-circle';
+const LAYER_START_RING = 'yg-start-ring';
+
+/**
+ * ズームの範囲。ズームは「見ている先までの距離」から決まる（[eye.ts](eye.ts)）ので、
+ * 直接いじる操作は無い。
+ *
+ * 上限を21で止めているのは、MapLibreの近クリップ面が約6mあるため。
+ * 目の前の斜面（数m先）を狙うとその面より内側になり、地形が1枚も描かれなくなる。
+ * 上限に当たったときはカメラが視線の後ろへ十数m下がるが、位置の誤差は採点に響かない。
+ */
+const MIN_ZOOM = 12;
+const MAX_ZOOM = 21;
 
 export interface Terrain3DOptions {
+  /** 出題地点。ここに立って始める */
   center: LatLng;
   /** 初期の視線方位（真北基準・時計回り） */
   headingDeg: number;
-  /** 立っている地面の標高 [m]。表示にのみ使う */
+  /** 立っている地面の標高 [m]。地形タイルが届く前の視点計算に使う */
   groundElevationM?: number | undefined;
-  /** 足元のルートを描くためのトラック。無ければ描かない */
+  /** 歩けるルート。無ければその場から動けない */
   track?: TrackFeature | null;
-  /** 視点モードが変わったときに呼ばれる（UIの選択状態を合わせるため） */
-  onPresetChange?: ((preset: ViewPreset) => void) | undefined;
+  /** 移動状態が変わったときに呼ばれる（UIの活殺を合わせるため） */
+  onWalk?: ((state: WalkState) => void) | undefined;
+}
+
+export interface WalkState {
+  /** 出発地点からルート上を移動した距離 [m] */
+  movedM: number;
+  /** 歩けるか（ルートが登録されているか） */
+  canWalk: boolean;
 }
 
 /** 方位を「北」「北東」…の日本語表記にする。数字だけに頼らないため。 */
@@ -96,64 +97,69 @@ export function compassLabel(bearingDeg: number): string {
   return names[index] ?? '北';
 }
 
-/** 俯角の説明。今どちらを向いているかを言葉でも出す。 */
-export function pitchLabel(pitch: number): string {
-  if (pitch <= 12) return '真下';
-  if (pitch <= 45) return '見下ろし';
-  if (pitch <= 70) return 'やや見下ろし';
-  return '水平';
-}
-
 export class Terrain3D {
   readonly map: MapLibreMap;
-  private center: LatLng;
+  /** 出題地点（＝出発地点）。回答の正解はここ */
+  private start: LatLng;
+  private trackData: TrackFeature | null = null;
+  private route: RoutePath | null = null;
+  /** 出発地点がルートに乗っているか。乗っていなければ歩けない */
+  private onRoute = false;
+  private startAlongM = 0;
+  private alongM = 0;
   private bearing: number;
-  private preset: ViewPreset = 'first_person';
-  private pitch = PRESETS.first_person.pitch;
-  private zoom = PRESETS.first_person.zoom;
-  private groundElevation = 0;
-  private track: TrackFeature | null;
+  private downDeg = MIN_DOWN_DEG;
+  /** 出題データ由来の実標高 [m]。地形タイルが届く前の代用に使う */
+  private groundElevationM: number;
   private ready = false;
+  private frame: number | null = null;
+  /** 地形が変わるたびに解き直すが、揺れ続けないよう回数を絞る */
+  private settleBudget = SETTLE_APPLIES;
+  /** MapLibreに視点を書き換えられて解き直した回数（際限なく繰り返さないため） */
+  private rewrites = 0;
   private dragPointerId: number | null = null;
   private lastX = 0;
   private lastY = 0;
+  private dragTravel = 0;
+  private note: string | null = null;
+  private noteTimer: number | null = null;
   private readonly hud: HTMLElement;
-  private readonly onPresetChange: ((preset: ViewPreset) => void) | undefined;
+  private readonly onWalk: ((state: WalkState) => void) | undefined;
 
   constructor(container: HTMLElement, options: Terrain3DOptions) {
     registerGsiDemProtocol();
-    this.center = options.center;
+    this.start = options.center;
     this.bearing = options.headingDeg;
-    this.groundElevation = options.groundElevationM ?? 0;
-    this.track = options.track ?? null;
-    this.onPresetChange = options.onPresetChange;
+    this.groundElevationM = options.groundElevationM ?? 0;
+    this.onWalk = options.onWalk;
 
     this.map = new MapLibreMap({
       container,
       style: terrainStyle(),
       center: [options.center.lon, options.center.lat],
-      zoom: this.zoom,
-      pitch: this.pitch,
+      zoom: 17,
+      pitch: 90 - MIN_DOWN_DEG,
       bearing: options.headingDeg,
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
-      maxPitch: MAX_PITCH,
+      // 既定の上限は60度。これだと目線の高さに立てないので、MapLibreの上限まで開ける
+      maxPitch: 90 - MIN_DOWN_DEG,
       attributionControl: false,
-      // 立ち位置が動く操作は全部切る。動かせるのは向きと寄り引きだけ
+      // カメラはこのクラスが全部決める。MapLibre側の操作は全部切る
       dragPan: false,
       dragRotate: false,
       boxZoom: false,
       doubleClickZoom: false,
       keyboard: false,
       touchPitch: false,
+      scrollZoom: false,
+      touchZoomRotate: false,
     });
     this.map.addControl(
       new maplibregl.AttributionControl({ compact: false, customAttribution: GSI_ATTRIBUTION }),
       'bottom-right',
     );
-    // 寄り引きは画面中心（＝出題地点）を軸にする。カーソル位置を軸にすると地点がずれる
-    this.map.scrollZoom.enable({ around: 'center' });
-    this.map.touchZoomRotate.enable({ around: 'center' });
+    this.setTrack(options.track ?? null);
 
     if (import.meta.env.DEV) {
       (window as unknown as { __terrain?: Terrain3D }).__terrain = this;
@@ -164,8 +170,8 @@ export class Terrain3D {
     canvas.setAttribute('role', 'application');
     canvas.setAttribute(
       'aria-label',
-      'この地点から見た3D地形。ドラッグまたは矢印キーで360度見回せます。' +
-        '下を向くと自分がいる地点が中央に見えます。地名は表示されません。',
+      'この地点に立って見た3D地形。ドラッグまたは左右キーで見回し、' +
+        '上下キーかボタンでルートの上を前後に移動できます。地名は表示されません。',
     );
     canvas.style.cursor = 'grab';
 
@@ -173,21 +179,27 @@ export class Terrain3D {
     this.hud.className = 'terrain-hud';
     container.appendChild(this.hud);
 
-    this.bindLookAround(canvas);
-    // 寄り引きされたら内部の状態も合わせておく
-    this.map.on('zoomend', () => {
-      this.zoom = this.map.getZoom();
-    });
-    this.map.on('rotate', () => {
-      this.bearing = (((this.map.getBearing() % 360) + 360) % 360);
-      this.renderHud();
-    });
+    this.bindPointer(canvas);
+    this.bindKeys(canvas);
     this.map.on('load', () => {
       // 地形はスタイル読み込みが終わってから入れる
       this.map.setTerrain({ source: TERRAIN_SOURCE, exaggeration: TERRAIN_EXAGGERATION });
       this.ready = true;
-      this.addHereMarker();
-      this.renderLocalRoute();
+      this.addStartMarker();
+      this.renderRoute();
+      this.restartSettle();
+      this.apply();
+    });
+    // 標高タイルが届くたびに地形の形が変わる。届いたら視点を解き直す
+    // （解き直しても答えが変わらなければ `sameAsCurrent` で何もしないので止まる）
+    this.map.on('sourcedata', (e) => {
+      if (e.sourceId !== TERRAIN_SOURCE) return;
+      this.restartSettle();
+      this.schedule();
+    });
+    this.map.on('idle', () => {
+      if (this.settleBudget <= 0) return;
+      this.settleBudget -= 1;
       this.apply();
     });
     this.renderHud();
@@ -196,34 +208,205 @@ export class Terrain3D {
   // -------------------------------------------------------------------------
   // 視点
   // -------------------------------------------------------------------------
+  /** 立っている場所。ルートに乗っていればその上、無ければ出題地点。 */
+  private eye(): LatLng {
+    return this.route && this.onRoute ? this.route.positionAt(this.alongM) : this.start;
+  }
+
   /**
-   * 出題地点を中心に据えたまま、向きと寄り引きだけを反映する。
-   * center を動かさないので、どれだけ回しても立ち位置は変わらない。
+   * 地形の標高 [m]（誇張後）。
+   *
+   * `queryTerrainElevation` が返すのは**中心からの相対値**なので、中心の標高を足して
+   * 絶対値にする。
+   *
+   * **標高タイルが未着の場所はちょうど0が返る**（MapLibreの仕様。地理院の欠測も0にしてある）。
+   * これをそのまま海面として扱うと「一面が海まで落ちている地形」を狙ってしまい、
+   * タイルが届くまで視点が空を向く。未着は「自分と同じ高さ」とみなして平坦に扱う。
+   */
+  private elevationAt(p: LatLng): number {
+    const relative = this.map.queryTerrainElevation([p.lon, p.lat]);
+    if (relative === null || !Number.isFinite(relative)) return this.fallbackElevation();
+    const absolute = this.map.transform.elevation + relative;
+    return absolute === 0 ? this.fallbackElevation() : absolute;
+  }
+
+  private fallbackElevation(): number {
+    return this.groundElevationM * TERRAIN_EXAGGERATION;
+  }
+
+  /** 地形や立ち位置が変わったので、落ち着くまで解き直す枠を戻す。 */
+  private restartSettle(): void {
+    this.settleBudget = SETTLE_APPLIES;
+    this.rewrites = 0;
+  }
+
+  /** 次のフレームで視点を解き直す。ドラッグ中に何度も呼ばれても1回にまとめる。 */
+  private schedule(): void {
+    if (this.frame !== null) return;
+    this.frame = window.requestAnimationFrame(() => {
+      this.frame = null;
+      this.apply();
+    });
+  }
+
+  /**
+   * 目の位置にカメラを立てる。
+   *
+   * 標高の参照はタイルのズームに依るので、カメラを動かすとその答えも変わる。
+   * 落ち着くまで数回解き直し、変わらなくなったら止める。
    */
   private apply(): void {
     this.renderHud();
     if (!this.ready) return;
-    this.map.jumpTo({
-      center: [this.center.lon, this.center.lat],
-      zoom: this.zoom,
-      bearing: this.bearing,
-      pitch: this.pitch,
-    });
+    const eye = this.eye();
+    const eyeLngLat = new LngLat(eye.lon, eye.lat);
+    for (let i = 0; i < 3; i += 1) {
+      const eyeAltitudeM = this.elevationAt(eye) + EYE_HEIGHT_M * TERRAIN_EXAGGERATION;
+      const aim = aimAtTerrain({
+        eye,
+        eyeAltitudeM,
+        bearingDeg: this.bearing,
+        downDeg: this.downDeg,
+        elevationAt: (p) => this.elevationAt(p),
+      });
+      const options = this.map.calculateCameraOptionsFromTo(
+        eyeLngLat,
+        eyeAltitudeM,
+        new LngLat(aim.target.lon, aim.target.lat),
+        aim.targetAltitudeM,
+      );
+      // MapLibre側でも丸められるが、丸めた値で比べないと同じ視点だと気づけない
+      options.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, options.zoom ?? MAX_ZOOM));
+      if (this.sameAsCurrent(options)) break;
+      const tileZoom = this.map.transform.tileZoom;
+      this.map.jumpTo(options);
+      // MapLibreには「カメラが地形に潜ったら持ち上げる」保護がある。中心の標高の更新が
+      // 1フレーム遅れるため、視線を大きく振ると誤検知して俯瞰に書き換えられることがある。
+      // 書き換えられたら次のフレームで解き直す（そのときは中心の標高が追いついている）。
+      if (Math.abs(this.map.getPitch() - (options.pitch ?? 0)) > 0.5 && this.rewrites < 4) {
+        this.rewrites += 1;
+        this.settleBudget = SETTLE_APPLIES;
+        this.schedule();
+        break;
+      }
+      // タイルのズームが変わらなければ標高の答えも変わらない。解き直しても同じ
+      if (this.map.transform.tileZoom === tileZoom) break;
+    }
   }
 
-  private look(deltaYaw: number, deltaPitch: number): void {
+  /** 今のカメラとほぼ同じなら動かさない（無駄な再描画と解き直しの往復を止める）。 */
+  private sameAsCurrent(options: CameraOptions): boolean {
+    const center = options.center ? LngLat.convert(options.center) : null;
+    if (!center) return false;
+    const current = this.map.getCenter();
+    return (
+      Math.abs((options.zoom ?? 0) - this.map.getZoom()) < 0.02 &&
+      Math.abs((options.pitch ?? 0) - this.map.getPitch()) < 0.05 &&
+      Math.abs(angleDiffDeg(options.bearing ?? 0, this.map.getBearing())) < 0.05 &&
+      Math.abs(center.lng - current.lng) < 1e-7 &&
+      Math.abs(center.lat - current.lat) < 1e-7
+    );
+  }
+
+  private look(deltaYaw: number, deltaDown: number): void {
     this.bearing = (((this.bearing + deltaYaw) % 360) + 360) % 360;
-    this.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, this.pitch + deltaPitch));
-    this.apply();
+    this.downDeg = Math.max(MIN_DOWN_DEG, Math.min(MAX_DOWN_DEG, this.downDeg + deltaDown));
+    this.restartSettle();
+    this.schedule();
   }
 
-  private bindLookAround(canvas: HTMLCanvasElement): void {
+  // -------------------------------------------------------------------------
+  // ルートの上を歩く
+  // -------------------------------------------------------------------------
+  /**
+   * 見ている向きへ歩く（負の距離で後ろへ）。
+   *
+   * ルートは1本の線なので、進む方向は「今向いている方位に近い側」で決める。
+   * ストリートビューと同じで、振り向いて「進む」を押せば逆向きに歩ける。
+   */
+  walk(distanceM: number): void {
+    const route = this.walkableRoute();
+    if (!route) return;
+    const forward = Math.abs(angleDiffDeg(route.bearingAt(this.alongM), this.bearing)) <= 90;
+    const delta = forward ? distanceM : -distanceM;
+    const next = Math.max(0, Math.min(route.totalM, this.alongM + delta));
+    if (Math.abs(next - this.alongM) < 0.01) {
+      this.flash('ルートの端です');
+      return;
+    }
+    this.alongM = next;
+    this.afterWalk();
+  }
+
+  /** 出発地点（＝出題地点）へ戻る。 */
+  returnToStart(): void {
+    if (!this.walkableRoute() || Math.abs(this.alongM - this.startAlongM) < 0.01) return;
+    this.alongM = this.startAlongM;
+    this.afterWalk();
+  }
+
+  /** ルートの上をタップして移動する。ルートから遠いタップは無視する。 */
+  private walkTo(p: LatLng): void {
+    const route = this.walkableRoute();
+    if (!route) return;
+    const anchor = route.anchorFor(p);
+    if (anchor.offsetM > TAP_SNAP_M) {
+      this.flash('ルート（朱線）の上をタップすると移動できます');
+      return;
+    }
+    this.alongM = anchor.alongM;
+    this.afterWalk();
+  }
+
+  private afterWalk(): void {
+    this.restartSettle();
+    this.updateStartMarker();
+    this.schedule();
+    this.onWalk?.(this.walkState());
+  }
+
+  walkState(): WalkState {
+    return { movedM: this.movedM(), canWalk: this.walkableRoute() !== null };
+  }
+
+  /** 歩けるルート。トラックが無い／出発地点がルートから離れているときは null。 */
+  private walkableRoute(): RoutePath | null {
+    return this.onRoute ? this.route : null;
+  }
+
+  private movedM(): number {
+    return this.onRoute ? Math.abs(this.alongM - this.startAlongM) : 0;
+  }
+
+  /** 出発地点がルートのどこに当たるかを求める。 */
+  private locateStart(): void {
+    this.onRoute = false;
+    this.startAlongM = 0;
+    if (this.route) {
+      const anchor = this.route.anchorFor(this.start);
+      // ルートから離れすぎている地点は「乗っていない」扱いにして動かさない
+      this.onRoute = anchor.offsetM <= TAP_SNAP_M;
+      if (this.onRoute) this.startAlongM = anchor.alongM;
+    }
+    this.alongM = this.startAlongM;
+  }
+
+  // -------------------------------------------------------------------------
+  // 操作
+  // -------------------------------------------------------------------------
+  private bindPointer(canvas: HTMLCanvasElement): void {
     canvas.addEventListener('pointerdown', (e) => {
-      if (e.pointerType === 'touch') return; // タッチは MapLibre のジェスチャに任せる
+      if (this.dragPointerId !== null) return;
       this.dragPointerId = e.pointerId;
       this.lastX = e.clientX;
       this.lastY = e.clientY;
-      canvas.setPointerCapture(e.pointerId);
+      this.dragTravel = 0;
+      // 画面外まで引っ張っても追従させる（取れなくても見回しは動く）
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // 何もしない
+      }
       canvas.style.cursor = 'grabbing';
     });
     canvas.addEventListener('pointermove', (e) => {
@@ -232,73 +415,134 @@ export class Terrain3D {
       const dy = e.clientY - this.lastY;
       this.lastX = e.clientX;
       this.lastY = e.clientY;
+      this.dragTravel += Math.abs(dx) + Math.abs(dy);
       // 右にドラッグすると景色が右に流れる（＝視線は左へ）
-      this.look(-dx * YAW_PER_PX, -dy * PITCH_PER_PX);
+      this.look(-dx * YAW_PER_PX, -dy * DOWN_PER_PX);
     });
     const end = (e: PointerEvent): void => {
       if (this.dragPointerId !== e.pointerId) return;
       this.dragPointerId = null;
       canvas.style.cursor = 'grab';
+      if (this.dragTravel < TAP_SLOP_PX) this.tap(e);
     };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
+  }
 
-    // ポインタが使えなくても見回せるようにする
+  /** タップした地形の位置を拾い、ルートの上ならそこへ移動する。 */
+  private tap(e: PointerEvent): void {
+    const rect = this.map.getCanvas().getBoundingClientRect();
+    const lngLat = this.map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+    this.walkTo({ lat: lngLat.lat, lon: lngLat.lng });
+  }
+
+  private bindKeys(canvas: HTMLCanvasElement): void {
     canvas.addEventListener('keydown', (e) => {
-      const step = e.shiftKey ? 15 : 5;
-      if (e.key === 'ArrowLeft') this.look(-step, 0);
-      else if (e.key === 'ArrowRight') this.look(step, 0);
-      else if (e.key === 'ArrowUp') this.look(0, step);
-      else if (e.key === 'ArrowDown') this.look(0, -step);
+      const turn = e.shiftKey ? 15 : 5;
+      const step = e.shiftKey ? LONG_STEP_M : STEP_M;
+      if (e.key === 'ArrowLeft') this.look(-turn, 0);
+      else if (e.key === 'ArrowRight') this.look(turn, 0);
+      else if (e.key === 'ArrowUp') this.walk(step);
+      else if (e.key === 'ArrowDown') this.walk(-step);
+      else if (e.key === 'PageUp') this.look(0, -3);
+      else if (e.key === 'PageDown') this.look(0, 3);
+      else if (e.key === 'Home') this.returnToStart();
       else return;
       e.preventDefault();
     });
   }
 
-  /** 真下を向く。自分がいる地点が画面の中央に来る。 */
-  lookDown(): void {
-    this.pitch = MIN_PITCH;
-    this.apply();
-  }
-
-  /** 視点モードを切り替える。中心は動かないので立ち位置は変わらない。 */
-  setPreset(preset: ViewPreset): void {
-    this.preset = preset;
-    const config = PRESETS[preset];
-    this.pitch = config.pitch;
-    this.zoom = config.zoom;
-    this.apply();
-    this.onPresetChange?.(preset);
-  }
-
-  currentPreset(): ViewPreset {
-    return this.preset;
-  }
-
   // -------------------------------------------------------------------------
-  // 立ち位置の表示
+  // 地形の上に描くもの
   // -------------------------------------------------------------------------
-  /** 出題地点に現在地の印を描く。見下ろすと自分の立っている場所が分かる。 */
-  private addHereMarker(): void {
+  /** トラックを差し替える（山が変わったとき）。 */
+  setTrack(track: TrackFeature | null): void {
+    this.trackData = track;
+    this.route = RoutePath.from(track);
+    this.locateStart();
+    if (this.ready) {
+      this.renderRoute();
+      this.updateStartMarker();
+      this.restartSettle();
+      this.apply();
+    }
+    this.onWalk?.(this.walkState());
+  }
+
+  /**
+   * ルート全体を地形の上に描く。
+   *
+   * 線は地形に貼り付けて描かれる（貼り付け先の解像度は標高タイルに縛られるので、
+   * 近くで見ると登山道くらいの幅に見える）。尾根の裏に回った部分は地形に隠れて見えない。
+   */
+  private renderRoute(): void {
+    const track = this.trackData;
+    if (!track) {
+      for (const id of [LAYER_ROUTE, LAYER_ROUTE_HALO]) {
+        if (this.map.getLayer(id)) this.map.removeLayer(id);
+      }
+      if (this.map.getSource(SOURCE_ROUTE)) this.map.removeSource(SOURCE_ROUTE);
+      return;
+    }
+    const data = track as unknown as GeoJSON.Feature;
+    const source = this.map.getSource(SOURCE_ROUTE);
+    if (source && 'setData' in source) {
+      (source as maplibregl.GeoJSONSource).setData(data);
+      return;
+    }
+    this.map.addSource(SOURCE_ROUTE, { type: 'geojson', data });
+    // 線は地形に焼き付けて描かれ、その解像度は標高タイル（z14＝約5m）に縛られる。
+    // つまり線幅1は地面の約5m。登山道らしく見える太さになるまで絞り、
+    // 遠くを見ているとき（ズームが下がるとき）は見失わないよう太くする
+    const width = (scale: number): maplibregl.ExpressionSpecification => [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      13,
+      2.5 * scale,
+      17,
+      0.9 * scale,
+      21,
+      0.35 * scale,
+    ];
+    this.map.addLayer({
+      id: LAYER_ROUTE_HALO,
+      type: 'line',
+      source: SOURCE_ROUTE,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#ffffff', 'line-width': width(1.8), 'line-opacity': 0.4 },
+    });
+    this.map.addLayer({
+      id: LAYER_ROUTE,
+      type: 'line',
+      source: SOURCE_ROUTE,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#c2410c', 'line-width': width(1) },
+    });
+  }
+
+  /** 出発地点の印。歩いて離れたときだけ出す（足元にあるうちは邪魔なので出さない）。 */
+  private addStartMarker(): void {
     const feature: GeoJSON.Feature = {
       type: 'Feature',
       properties: {},
-      geometry: { type: 'Point', coordinates: [this.center.lon, this.center.lat] },
+      geometry: { type: 'Point', coordinates: [this.start.lon, this.start.lat] },
     };
-    const source = this.map.getSource(SOURCE_HERE);
+    const source = this.map.getSource(SOURCE_START);
     if (source && 'setData' in source) {
       (source as maplibregl.GeoJSONSource).setData(feature);
+      this.updateStartMarker();
       return;
     }
-    this.map.addSource(SOURCE_HERE, { type: 'geojson', data: feature });
+    this.map.addSource(SOURCE_START, { type: 'geojson', data: feature });
     this.map.addLayer({
-      id: LAYER_HERE_RING,
+      id: LAYER_START_RING,
       type: 'circle',
-      source: SOURCE_HERE,
+      source: SOURCE_START,
       paint: {
-        'circle-radius': 26,
+        'circle-radius': 16,
         'circle-color': '#e8a33d',
-        'circle-opacity': 0.2,
+        'circle-opacity': 0.18,
         'circle-stroke-color': '#e8a33d',
         'circle-stroke-width': 1.5,
         'circle-stroke-opacity': 0.7,
@@ -306,84 +550,71 @@ export class Terrain3D {
       },
     });
     this.map.addLayer({
-      id: LAYER_HERE,
+      id: LAYER_START,
       type: 'circle',
-      source: SOURCE_HERE,
+      source: SOURCE_START,
       paint: {
-        'circle-radius': 7,
+        'circle-radius': 5,
         'circle-color': '#e8a33d',
         'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': 2,
+        'circle-stroke-width': 1.5,
         'circle-pitch-alignment': 'map',
       },
     });
+    this.updateStartMarker();
   }
 
-  /**
-   * 足元のルートだけを描く。
-   *
-   * **ルート全体を描かない。** 3Dに全体を出すと、地形図を見なくても
-   * どこを歩いているかが分かってしまう。進む向きが読める最小限（前後10m）に絞る。
-   */
-  private renderLocalRoute(): void {
-    const segment = this.track
-      ? localRouteSegment(this.track, this.center, LOCAL_ROUTE_RADIUS_M)
-      : null;
-    if (!segment) {
-      this.clearLocalRoute();
-      return;
+  private updateStartMarker(): void {
+    const visible = this.movedM() >= START_MARKER_AFTER_M ? 'visible' : 'none';
+    for (const id of [LAYER_START, LAYER_START_RING]) {
+      if (this.map.getLayer(id)) this.map.setLayoutProperty(id, 'visibility', visible);
     }
-    const data = segment as unknown as GeoJSON.Feature;
-    const source = this.map.getSource(SOURCE_ROUTE);
-    if (source && 'setData' in source) {
-      (source as maplibregl.GeoJSONSource).setData(data);
-      return;
-    }
-    this.map.addSource(SOURCE_ROUTE, { type: 'geojson', data });
-    this.map.addLayer({
-      id: LAYER_ROUTE_HALO,
-      type: 'line',
-      source: SOURCE_ROUTE,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.8 },
-    });
-    this.map.addLayer({
-      id: LAYER_ROUTE,
-      type: 'line',
-      source: SOURCE_ROUTE,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#c2410c', 'line-width': 5 },
-    });
   }
 
-  private clearLocalRoute(): void {
-    for (const id of [LAYER_ROUTE, LAYER_ROUTE_HALO]) {
-      if (this.map.getLayer(id)) this.map.removeLayer(id);
-    }
-    if (this.map.getSource(SOURCE_ROUTE)) this.map.removeSource(SOURCE_ROUTE);
+  // -------------------------------------------------------------------------
+  // 画面表示
+  // -------------------------------------------------------------------------
+  /** 短い知らせを出す（ルートの端に来た、など）。 */
+  private flash(message: string): void {
+    this.note = message;
+    this.renderHud();
+    if (this.noteTimer !== null) window.clearTimeout(this.noteTimer);
+    this.noteTimer = window.setTimeout(() => {
+      this.note = null;
+      this.noteTimer = null;
+      this.renderHud();
+    }, 2200);
   }
 
-  /** トラックを差し替える（山が変わったとき）。 */
-  setTrack(track: TrackFeature | null): void {
-    this.track = track;
-    if (this.ready) this.renderLocalRoute();
+  /** 立っている地面の標高 [m]（誇張を戻した実標高）。 */
+  private standingElevationM(): number {
+    if (!this.ready) return this.groundElevationM;
+    return this.elevationAt(this.eye()) / TERRAIN_EXAGGERATION;
   }
 
   private renderHud(): void {
-    const elevation = this.groundElevation > 0
-      ? `<span class="terrain-hud__ele num">標高 ${Math.round(this.groundElevation)} m</span>`
-      : '';
-    this.hud.innerHTML = `
-      <span class="terrain-hud__here">この地点</span>
-      <span class="terrain-hud__facing num">${Math.round(this.bearing)}°</span>
-      <span class="terrain-hud__dir">${compassLabel(this.bearing)}向き・${pitchLabel(this.pitch)}</span>
-      ${elevation}
-    `;
+    const moved = this.movedM();
+    const elevation = this.standingElevationM();
+    const parts = [
+      `<span class="terrain-hud__here">${moved >= 1 ? '今ここ' : 'この地点'}</span>`,
+      `<span class="terrain-hud__facing num">${Math.round(this.bearing)}°</span>`,
+      `<span class="terrain-hud__dir">${compassLabel(this.bearing)}向き</span>`,
+    ];
+    if (elevation > 0) {
+      parts.push(`<span class="terrain-hud__ele num">標高 ${Math.round(elevation)} m</span>`);
+    }
+    if (moved >= 1) {
+      parts.push(
+        `<span class="terrain-hud__moved num">出発地点から ${Math.round(moved)} m</span>`,
+      );
+    }
+    if (this.note) parts.push(`<span class="terrain-hud__note">${this.note}</span>`);
+    this.hud.innerHTML = parts.join('\n');
   }
 
-  /** 足元のルートの説明。凡例として画面に出す。 */
+  /** 操作の説明。凡例として画面に出す。 */
   static routeLegend(): string {
-    return `足元の朱線はルート（前後${LOCAL_ROUTE_RADIUS_M}m）`;
+    return '朱線は歩いたルート。ドラッグで見回し、タップで移動';
   }
 
   // -------------------------------------------------------------------------
@@ -391,15 +622,17 @@ export class Terrain3D {
   // -------------------------------------------------------------------------
   /** 次の問題へ。立ち位置と初期の向きを移す。 */
   moveTo(center: LatLng, headingDeg: number, groundElevationM?: number): void {
-    this.center = center;
+    this.start = center;
     this.bearing = headingDeg;
-    this.pitch = PRESETS[this.preset].pitch;
-    this.zoom = PRESETS[this.preset].zoom;
-    this.groundElevation = groundElevationM ?? 0;
+    this.downDeg = MIN_DOWN_DEG;
+    this.groundElevationM = groundElevationM ?? 0;
+    this.locateStart();
     if (this.ready) {
-      this.addHereMarker();
-      this.renderLocalRoute();
+      this.addStartMarker();
+      this.renderRoute();
+      this.restartSettle();
     }
+    this.onWalk?.(this.walkState());
     this.apply();
   }
 
@@ -408,6 +641,8 @@ export class Terrain3D {
   }
 
   destroy(): void {
+    if (this.frame !== null) window.cancelAnimationFrame(this.frame);
+    if (this.noteTimer !== null) window.clearTimeout(this.noteTimer);
     this.hud.remove();
     this.map.remove();
   }
