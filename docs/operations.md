@@ -25,14 +25,31 @@
 
 ## Supabase初期セットアップ
 1. Supabaseプロジェクトを作成する
-2. **Authentication → Sign In / Providers → Anonymous sign-ins を有効化**（無効のままだとサインインに失敗し、リーダーボードが使えない）
-3. **SQL Editor で`supabase/schema.sql`を実行**して`players`/`scores`テーブルとRLSポリシーを作る
+2. **SQL Editor で`supabase/schema.sql`を実行**して`players`/`scores`テーブル・RLS・`leaderboard`ビューを作る
+3. **Googleログインを有効化する**（下記）
 4. プロジェクトURL・anon keyを`.env`（ローカル）とGitHub Actions Secrets（ビルド時に埋め込み）双方に設定する
+
+### Googleログインの有効化
+**ダッシュボードでの設定で、SQLでは設定できない**（認証プロバイダの設定はDBではなくAuthの構成のため）。
+
+1. **Google Cloud Console** → APIとサービス → 認証情報 → OAuth 2.0 クライアントID（種類: ウェブアプリケーション）を作る
+   - **承認済みのリダイレクトURI**に `https://<プロジェクト>.supabase.co/auth/v1/callback` を登録する
+   - 同意画面（OAuth consent screen）の設定も必要。テスト運用なら「テストユーザー」に自分たちを追加する
+2. **Supabase** → Authentication → Sign In / Providers → **Google** を有効化し、上で作った Client ID / Client Secret を貼る
+3. **Supabase** → Authentication → **URL Configuration** に、戻り先を登録する（未登録だとログイン後に弾かれる）
+   - Site URL: `https://<ユーザー名>.github.io/YamaGuessr/`
+   - Redirect URLs: 同じURLと、ローカル開発用の `http://localhost:5173/`
+
+アプリ側の戻り先は `window.location.origin + import.meta.env.BASE_URL`（`src/supabase.ts`）なので、
+**リポジトリ名を変えたらこの登録も変える**。
+
+匿名サインインは使わない（機能K参照）。有効にする必要はない。
 
 設定できているかは、`.env`を置いた状態で次を確認するのが早い。
 
-- `https://<プロジェクト>.supabase.co/auth/v1/settings` に anon key を付けて GET → `external.anonymous_users` が `true`
 - `/rest/v1/scores?select=id&limit=1` が 200（404なら`schema.sql`が未実行）
+- `/rest/v1/leaderboard?select=id,nickname,points&limit=1` が 200（ビューまで作れているか）
+- `https://<プロジェクト>.supabase.co/auth/v1/settings` に anon key を付けて GET → `external.google` が `true`
 
 ## 運用メモ
 - クイズデータ（quiz_points.json・画像）は完全に静的配信のため、DB障害時もゲーム本体は動作する（機能Kの受け入れ条件）

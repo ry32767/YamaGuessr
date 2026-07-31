@@ -120,14 +120,21 @@ class App {
     this.showHome();
   }
 
-  /** Supabase は繋がらなくてもよい。繋がったときだけリーダーボードを有効にする。 */
+  /**
+   * 前回のログインが残っていれば復帰する。
+   *
+   * **ログインは強制しない。** ログインしていなくても全部遊べて、
+   * 記録を残したい人だけが「Googleでログイン」を押す（DESIGN.md 不変条件7）。
+   */
   private async connect(): Promise<void> {
     if (!remote.isConfigured()) return;
-    const id = await remote.signIn();
-    if (!id) return;
-    await remote.syncNickname();
-    if (!loadSettings().nickname) this.askNickname();
+    const authError = remote.takeAuthError();
+    if (authError) toast(`ログインできませんでした（${authError}）`, 'error');
+    const id = await remote.restoreSession();
     this.renderChrome();
+    if (!id) return;
+    // ログイン直後はURLに戻り値が残ることがあるので、ホームを描き直して整える
+    this.showHome();
   }
 
   // -------------------------------------------------------------------------
@@ -187,11 +194,32 @@ class App {
     append(this.chrome, soundBtn);
 
     if (remote.isConfigured()) {
-      const nameBtn = el('button', { class: 'btn btn--ghost', type: 'button' }, remote.nickname());
-      nameBtn.setAttribute('aria-label', `ニックネーム ${remote.nickname()}。変更する`);
-      nameBtn.addEventListener('click', () => this.askNickname());
-      append(this.chrome, nameBtn);
+      if (remote.isSignedIn()) {
+        const nameBtn = el('button', { class: 'btn btn--ghost', type: 'button' }, remote.nickname());
+        nameBtn.setAttribute('aria-label', `ニックネーム ${remote.nickname()}。変更する`);
+        nameBtn.addEventListener('click', () => this.askNickname());
+        append(this.chrome, nameBtn);
+      } else {
+        append(this.chrome, this.loginButton('btn btn--ghost'));
+      }
     }
+  }
+
+  /**
+   * 「Googleでログイン」ボタン。押すとGoogleへ飛び、戻ってきたら記録が残せる。
+   * ログインしなくてもゲームは全部遊べるので、主アクションにはしない。
+   */
+  private loginButton(className = 'btn btn--ghost btn--block'): HTMLElement {
+    const button = el('button', { class: className, type: 'button' }, 'Googleでログイン');
+    button.addEventListener('click', () => {
+      button.disabled = true;
+      void remote.signInWithGoogle().then((error) => {
+        if (!error) return;
+        button.disabled = false;
+        toast(`ログインを開始できませんでした（${error}）`, 'error');
+      });
+    });
+    return button;
   }
 
   private confirmLeave(): void {
@@ -267,6 +295,23 @@ class App {
       );
       board.addEventListener('click', () => void this.showLeaderboard());
       append(home, board);
+      if (!remote.isSignedIn()) {
+        append(
+          home,
+          el(
+            'div',
+            { class: 'panel stack' },
+            el('b', {}, '記録を残すには'),
+            el(
+              'p',
+              { class: 'muted tiny' },
+              'ログインしなくても全部遊べます。Googleでログインすると、' +
+                'スコアがリーダーボードに載り、ニックネームを付けられます。',
+            ),
+            this.loginButton(),
+          ),
+        );
+      }
     }
 
     if (isLocalhost()) append(home, this.studioCard());
@@ -603,7 +648,12 @@ class App {
   }
 
   private async sendScore(session: QuizSession): Promise<void> {
-    if (!remote.isConfigured() || !remote.currentPlayerId()) return;
+    if (!remote.isConfigured()) return;
+    if (!remote.isSignedIn()) {
+      // 記録が残らないことは黙らず伝える（あとから同じ記録は作れない）
+      toast('ログインしていないので記録は残りません', 'info');
+      return;
+    }
     const ok = await remote.submitScore({
       mode: session.mode,
       view_mode: session.viewMode,
@@ -703,6 +753,14 @@ class App {
     error.hidden = true;
 
     const cancel = el('button', { class: 'btn btn--ghost', type: 'button' }, 'あとで');
+    const logout = el('button', { class: 'btn btn--ghost', type: 'button' }, 'ログアウト');
+    logout.addEventListener('click', () => {
+      void remote.signOut().then(() => {
+        dialog.close();
+        this.renderChrome();
+        this.showHome();
+      });
+    });
     const form = el(
       'form',
       { method: 'dialog', class: 'stack' },
@@ -728,6 +786,8 @@ class App {
         { class: 'row' },
         el('button', { class: 'btn btn--primary', type: 'submit', value: 'ok' }, '保存'),
         cancel,
+        el('span', { class: 'spacer' }),
+        logout,
       ),
     );
     append(dialog, form);

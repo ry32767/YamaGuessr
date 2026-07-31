@@ -16,7 +16,7 @@
 | フロントエンド | Vite + TypeScript（バニラ、フレームワーク無し）+ MapLibre GL JS **v5** |
 | 3D地形 | MapLibre GL Terrain（国土地理院DEM。標高タイルは`addProtocol`で自前変換、外部ライブラリ無し）。一人称は`centerClampedToGround: false`＋`pitch>90`（v5必須） |
 | 前処理 | Python 3.11（`pipeline/`、ffmpeg依存） |
-| DB | Supabase（Postgres／匿名認証＋スコアのみ。クイズデータはDB不使用） |
+| DB | Supabase（Postgres／Googleログイン＋スコアのみ。クイズデータはDB不使用） |
 | Deploy | GitHub Pages + GitHub Actions |
 
 ## Commands
