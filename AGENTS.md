@@ -13,8 +13,8 @@
 ## Tech Stack
 | レイヤー | 技術 |
 |---|---|
-| フロントエンド | Vite + TypeScript（バニラ、フレームワーク無し）+ MapLibre GL JS |
-| 3D地形 | MapLibre GL Terrain + `maplibre-gl-gsi-terrain`（国土地理院DEM） |
+| フロントエンド | Vite + TypeScript（バニラ、フレームワーク無し）+ MapLibre GL JS **v5** |
+| 3D地形 | MapLibre GL Terrain（国土地理院DEM。標高タイルは`addProtocol`で自前変換、外部ライブラリ無し）。一人称は`centerClampedToGround: false`＋`pitch>90`（v5必須） |
 | 前処理 | Python 3.11（`pipeline/`、ffmpeg依存） |
 | DB | Supabase（Postgres／匿名認証＋スコアのみ。クイズデータはDB不使用） |
 | Deploy | GitHub Pages + GitHub Actions |
@@ -51,7 +51,10 @@ python pipeline/build_library.py \
 python pipeline/extract_frames.py previews \
   --candidates pipeline/data/candidates.json \
   --video clip=Source/DJI_xxx.MP4 --out-dir pipeline/data/previews
-python -m http.server                              # ルートで起動し /pipeline/review.html を開く
+                                                   # ← レビューは studio の「レビュー」から開き、
+                                                   #    「studioに保存」で confirmed_points.json を書く
+                                                   #    （studio 抜きなら python -m http.server で
+                                                   #     /pipeline/review.html を開き、書き出して置く）
 python pipeline/extract_frames.py final \
   --confirmed pipeline/data/confirmed_points.json \
   --video clip=Source/DJI_xxx.MP4 --out-dir pipeline/data/frames

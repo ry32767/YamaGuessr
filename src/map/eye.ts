@@ -1,95 +1,89 @@
 /**
- * 一人称カメラの狙い先（地図の中心に据える地面の1点）を決める。
+ * 一人称カメラの狙い先（画面の中心に据える点）を決める。
  *
- * MapLibre のカメラは「地面の1点を見る」形しか取れず、`pitch` の上限が85度なので
- * 水平より上は見上げられない。また地形を有効にすると**中心の標高は必ず地面の標高**に
- * 合わせられるため、中心を空中に置くこともできない。
+ * **MapLibre v5 の `centerClampedToGround: false` を使う。** 中心を地面に貼り付ける
+ * 制約が外れるので、**視線上の一点をそのまま中心にできる**。おかげで
  *
- * そこで **視線を地形に当てた点** を中心にする。その点の標高は地形の標高そのものだから
- * 帳尻が合い、カメラはぴったり目の位置（地面＋目線の高さ）に立つ。副作用として
- * 「見ている先までの距離」でズームが決まるので、近くを見れば寄り、遠くを見れば引く。
+ * - 見下ろし角は操作した角度そのもの（地形で勝手に変わらない）
+ * - 水平も、見上げも表せる（`pitch > 90` が使えるため）
+ * - ズームは狙い先までの距離だけで決まる（＝距離を一定にすれば画も落ち着く）
+ *
+ * となり、v4でやっていた「視線が地面に当たる点を探す」処理は要らなくなった。
+ * 残る仕事は**狙い先をどれだけ先に置くか**だけで、これは近クリップ面が
+ * 足元の地面を切り取らない距離、という条件で決まる（下記 `NEAR_PLANE_RATIO`）。
  */
 import type { LatLng } from '../scoring';
 
 const M_PER_DEG_LAT = 111_320;
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
-const toDeg = (rad: number): number => (rad * 180) / Math.PI;
 
 /** 目線の高さ [m]。ルート上の地面からこれだけ上にカメラを置く */
 export const EYE_HEIGHT_M = 1.5;
 
 /**
- * 見下ろし角の下限 [deg]（0が水平）。
- * MapLibre の pitch 上限85度がそのままこの値になる（pitch = 90 - 見下ろし角）。
+ * 見下ろし角の範囲 [deg]（0が水平、負が見上げ）。
+ *
+ * MapLibre の `pitch` は `90 - この角度`。v5 は pitch の上限が180まで開いたので、
+ * **水平（pitch 90）も見上げ（pitch > 90）も表せる**。v4では85が上限で、
+ * 視線の中心は必ず水平より5.5度下だった。
  */
-export const MIN_DOWN_DEG = 5.5;
-
-/** 見下ろし角の上限 [deg]。足元を覗き込む程度まで。俯瞰はしない */
-export const MAX_DOWN_DEG = 24;
+export const MIN_DOWN_DEG = -40;
+export const MAX_DOWN_DEG = 40;
+/** 立ったときの既定の視線。山を見るのだから水平から始める */
+export const DEFAULT_DOWN_DEG = 0;
 
 /**
- * 地形の都合で視線を下げるときの限界 [deg]。
+ * 一人称の画角（縦）[deg]。画面の下端は視線より半分だけ下を向く。
  *
- * 急斜面の先や標高タイルの読み込み途中では、地形に当たる角度が極端に下向きになりうる。
- * そのまま従うと真上から見下ろす画（俯瞰）になってしまうので、ここで必ず止める。
- * **一人称を崩さないための保険**（DESIGN.md 不変条件2b）。
+ * MapLibre の既定は36.87度で、望遠レンズのように狭い。人の視野に近い**52度**まで
+ * 開いて、周りの尾根が視界に入るようにしている（`map.setVerticalFieldOfView`）。
+ * 広げるほど近クリップ面は相対的に遠くなり（下記）、足元も近く写るので、
+ * **狙い先の距離はそのぶん詰まる**（`aimDistanceM` が自動で吸収する）。
  */
-export const MAX_AIM_DOWN_DEG = 45;
+export const FOV_DEG = 52;
 
 /**
- * 視線を追う最遠距離 [m]。
+ * 近クリップ面の位置。**画面中心（＝狙い先）までの距離のこの割合**の所に来る。
  *
- * 狙い先が遠いほど地図のズームは下がり、近くの地形とテクスチャが粗くなる
- * （MapLibreはズームから描くタイルの細かさを決めるため）。**ズーム14を切ると
- * 標高タイルが1段粗いものに替わり、MapLibre側の「カメラが地形に潜ったか」の判定と
- * こちらの標高の読みがずれて、視点を書き換えられる。** その手前で止める。
+ * MapLibre の Transform は `nearZ = 画面高さ / 50`[px]、画面中心までの距離
+ * `= 0.5 / tan(画角/2) × 画面高さ`[px] を使うので、比は
+ * `tan(画角/2) / 25` になる（画面サイズにもズームにも依らない。実距離[m]でも同じ）。
+ *
+ * **ここが一人称の見え方を決める。** 遠くを狙うほど近クリップ面も遠ざかり、
+ * それより手前の地形——足元の地面——が描かれなくなる。**地形は裏面を捨てずに
+ * 描かれる**ので、切り取られた穴からは向こう側の斜面の**裏側**が見えてしまう。
  */
-export const MAX_RANGE_M = 1200;
+export const NEAR_PLANE_RATIO = Math.tan(toRad(FOV_DEG / 2)) / 25;
 
+/** 近クリップ面を、いちばん近い地面までの奥行きの何割までに収めるか */
+const NEAR_PLANE_MARGIN = 0.8;
+
+/** 狙い先までの距離の範囲 [m]。近すぎると寄りすぎ、遠すぎると足元が欠ける */
+export const MIN_AIM_M = 40;
+export const MAX_AIM_M = 250;
+
+/** 地面を探すときの刻み（等比）と最短距離 */
 const MIN_RANGE_M = 2;
-/** 距離のサンプル間隔（等比）。細かすぎても粗すぎても当たり判定が鈍る */
 const SAMPLE_RATIO = 1.2;
-
-export interface Aim {
-  /** 地図の中心に据える点 */
-  target: LatLng;
-  /** その点の標高 [m]（地形の誇張後の値） */
-  targetAltitudeM: number;
-  /** 目からその点までの距離 [m] */
-  distanceM: number;
-  /** 実際の見下ろし角 [deg] */
-  downDeg: number;
-}
 
 export interface AimOptions {
   eye: LatLng;
   /** 目の高さの標高 [m]（地形の誇張後の値） */
   eyeAltitudeM: number;
   bearingDeg: number;
-  /** 見下ろしたい角度 [deg]。地形の見え方によっては下向きに補正される */
+  /** 見下ろしたい角度 [deg]。0が水平、負は見上げ */
   downDeg: number;
   /** 座標の標高 [m]（地形の誇張後の値）を返す */
   elevationAt: (p: LatLng) => number;
 }
 
-/**
- * 視線が地面に届かない向きで、**いちばん水平に近く見られる**距離を選ぶ。
- *
- * MapLibreは「地面の1点」しか画面中心にできないので、谷を見渡す向きのように
- * 視線の先に地面が無いときは、地形の際（掠める角度が最小の場所）を狙うしかない。
- * ここで一番浅い角度を選んでおけば、操作した角度からのずれが最小になる。
- */
-function flattestDistance(distances: number[], grazes: number[]): number {
-  let best = distances[distances.length - 1] as number;
-  let smallest = Infinity;
-  for (let i = 0; i < distances.length; i += 1) {
-    const g = grazes[i] ?? Infinity;
-    if (g < smallest) {
-      smallest = g;
-      best = distances[i] as number;
-    }
-  }
-  return best;
+export interface Aim {
+  /** 画面の中心に据える点（空中でよい） */
+  target: LatLng;
+  /** その点の標高 [m]（地形の誇張後の値） */
+  altitudeM: number;
+  /** 目からその点までの距離 [m]（斜距離） */
+  distanceM: number;
 }
 
 /** ある方位・距離の座標。 */
@@ -103,98 +97,58 @@ export function destination(from: LatLng, bearingDeg: number, distanceM: number)
 }
 
 /**
- * 視線が地形に当たる点を求める。
+ * 画面にいちばん近く写る地面までの奥行き [m]。
  *
- * 当たらない（＝空を見ている）向きでは、その方位の**地形の際（きわ）**まで視線を下げる。
- * 上限85度の pitch では水平線より上を中心にできないので、見下ろし角を下げるしかない。
+ * 画角の**下端**（視線より `FOV_DEG/2` 下）を追い、地面に入った所までの距離を
+ * 視線方向の奥行きに直して返す。これより手前に近クリップ面があれば足元は描かれる。
+ * 見上げているときのように地面に当たらない向きでは `MAX_AIM_M` 相当を返す
+ * （＝足元が切れる心配が無いので、狙い先を遠くに置いてよい）。
  */
-export function aimAtTerrain(options: AimOptions): Aim {
+export function nearestGroundDepthM(options: AimOptions): number {
   const { eye, eyeAltitudeM, bearingDeg, elevationAt } = options;
-
-  const distances: number[] = [];
-  for (let t = MIN_RANGE_M; t < MAX_RANGE_M; t *= SAMPLE_RATIO) distances.push(t);
-  distances.push(MAX_RANGE_M);
-
-  const at = (t: number): number => elevationAt(destination(eye, bearingDeg, t));
-  /** 距離 t の地面をちょうど掠める見下ろし角 */
-  const grazing = (t: number): number => toDeg(Math.atan2(eyeAltitudeM - at(t), t));
-
-  const grazes = distances.map(grazing);
-  // **見下ろし角は操作した角度そのまま。地形で勝手に変えない。**
-  // 変えると、首を横に振っただけで視線が上下し「頭ごと動いた」ように見える。
-  const downDeg = Math.min(MAX_AIM_DOWN_DEG, Math.max(options.downDeg, MIN_DOWN_DEG));
-
-  const tan = Math.tan(toRad(downDeg));
-  /** 視線が地面より上なら正 */
-  const gap = (t: number): number => eyeAltitudeM - t * tan - at(t);
-
-  // 視線が地面に入る場所のうち**一番遠いもの**を選ぶ。
-  // 手前の交差を選ぶと極端に寄った画になり、遠くの尾根が描かれなくなる。
-  // 手前の地形に隠れて見えない点でも、視線の向きは同じで画は変わらない
-  // （中心をどこに置いても、目の位置と向きが同じなら見える景色は同じ）。
-  let index = -1;
-  for (let i = distances.length - 1; i >= 1; i -= 1) {
-    if ((grazes[i] ?? Infinity) <= downDeg && (grazes[i - 1] ?? -Infinity) > downDeg) {
-      index = i;
-      break;
-    }
+  const downDeg = clampDown(options.downDeg);
+  const tan = Math.tan(toRad(downDeg + FOV_DEG / 2));
+  const forward = Math.cos(toRad(FOV_DEG / 2));
+  const limit = MAX_AIM_M / NEAR_PLANE_MARGIN;
+  if (tan <= 0) return limit;
+  for (let t = MIN_RANGE_M; t <= limit; t *= SAMPLE_RATIO) {
+    const drop = eyeAltitudeM - elevationAt(destination(eye, bearingDeg, t));
+    if (drop <= t * tan) return Math.hypot(t, drop) * forward;
   }
-  // 目の前が壁（最初のサンプルから地面の中）のときは、手前の交差を使う
-  if (index < 0) index = grazes.findIndex((g) => g <= downDeg);
-
-  if (index >= 0) {
-    let above = index > 0 ? (distances[index - 1] as number) : MIN_RANGE_M;
-    let below = distances[index] as number;
-    if (gap(above) <= 0) above = MIN_RANGE_M;
-    for (let k = 0; k < 14; k += 1) {
-      const mid = (above + below) / 2;
-      if (gap(mid) > 0) above = mid;
-      else below = mid;
-    }
-    const hit = (above + below) / 2;
-    const found = aimAt(eye, bearingDeg, hit, eyeAltitudeM, elevationAt);
-    if (found.downDeg <= MAX_AIM_DOWN_DEG + 1) return found;
-  }
-
-  // 視線の先に地面が無い（谷や海を見渡している）向き。
-  // **一番浅く見られる場所**を狙う。狙い先の標高は実際の地形の値なので頭の位置は正しく、
-  // 操作した角度からのずれも最小になる（これ以上水平に近づけるとどこにも当たらない）。
-  const flattest = aimAt(
-    eye,
-    bearingDeg,
-    flattestDistance(distances, grazes),
-    eyeAltitudeM,
-    elevationAt,
-  );
-  if (flattest.downDeg <= MAX_AIM_DOWN_DEG + 1) return flattest;
-
-  // 崖の縁など、どこを狙っても真下に近い場合だけ、平らな地形と見なして角度を守る。
-  // 頭の位置は多少ずれるが、俯瞰の画にはしない（DESIGN.md 不変条件2b）。
-  const groundAtEye = elevationAt(eye);
-  const drop = Math.max(0.5, eyeAltitudeM - groundAtEye);
-  const hit = drop / tan;
-  return {
-    target: destination(eye, bearingDeg, hit),
-    targetAltitudeM: groundAtEye,
-    distanceM: Math.hypot(hit, drop),
-    downDeg,
-  };
+  return limit;
 }
 
-/** ある距離の地面を狙ったときの視点。 */
-function aimAt(
-  eye: LatLng,
-  bearingDeg: number,
-  distance: number,
-  eyeAltitudeM: number,
-  elevationAt: (p: LatLng) => number,
-): Aim {
-  const target = destination(eye, bearingDeg, distance);
-  const targetAltitudeM = elevationAt(target);
+/** 見下ろし角を可動範囲に収める。 */
+export function clampDown(downDeg: number): number {
+  return Math.max(MIN_DOWN_DEG, Math.min(MAX_DOWN_DEG, downDeg));
+}
+
+/**
+ * 狙い先までの距離 [m]。
+ *
+ * **近クリップ面（狙い先までの距離の1/75）が、いちばん近く写る地面より手前に
+ * 収まる距離までしか狙わない。** これを超えると足元が切り取られ、その穴から
+ * 地形の裏側が見える。逆に、崖の縁や見上げのようにいちばん近い地面が遠い向きでは、
+ * 遠くまで狙ってよい（穴が開きようがない）。
+ */
+export function aimDistanceM(options: AimOptions): number {
+  const limit = (nearestGroundDepthM(options) * NEAR_PLANE_MARGIN) / NEAR_PLANE_RATIO;
+  return Math.max(MIN_AIM_M, Math.min(MAX_AIM_M, limit));
+}
+
+/**
+ * 画面の中心に据える点。**視線の上の一点**で、地面である必要はない。
+ *
+ * 中心の標高が視線と一致しているので、MapLibre がカメラをその視線上に置く。
+ * 結果としてカメラは目の位置に、見下ろし角は操作した角度のままになる。
+ */
+export function aimTarget(options: AimOptions): Aim {
+  const downDeg = clampDown(options.downDeg);
+  const distanceM = aimDistanceM(options);
+  const horizontalM = distanceM * Math.cos(toRad(downDeg));
   return {
-    target,
-    targetAltitudeM,
-    distanceM: Math.hypot(distance, eyeAltitudeM - targetAltitudeM),
-    downDeg: toDeg(Math.atan2(eyeAltitudeM - targetAltitudeM, distance)),
+    target: destination(options.eye, options.bearingDeg, horizontalM),
+    altitudeM: options.eyeAltitudeM - distanceM * Math.sin(toRad(downDeg)),
+    distanceM,
   };
 }

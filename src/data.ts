@@ -68,29 +68,23 @@ export function imageUrls(point: QuizPoint): string[] {
 }
 
 /**
- * そのビューで出題できる地点だけを返す。
- * 画像を持たない地点はモード②（3D地形）専用（docs/spec.md 設計判断表）。
+ * 出題できる地点を返す。**並び順はデータの並び（＝GPXルート順）を保つ。**
+ *
+ * どちらのビューも3D地形を手がかりにするので、**画像の有無で出題対象は変わらない**
+ * （地形図当ては写真＋一人称3D、3D地形当ては3人称の地形モデル）。
+ * 画像はあれば地形図当てで追加の手がかりになる、という位置づけ。
  *
  * @param mountainId 指定するとその山（トラック）の地点だけに絞る
  */
-export function playablePoints(
-  data: QuizData,
-  viewMode: 'map2d' | 'terrain3d',
-  mountainId?: string | null,
-): QuizPoint[] {
-  const byMountain = mountainId
+export function playablePoints(data: QuizData, mountainId?: string | null): QuizPoint[] {
+  return mountainId
     ? data.points.filter((p) => p.mountain_id === mountainId)
-    : data.points;
-  return viewMode === 'map2d' ? byMountain.filter(hasImage) : [...byMountain];
+    : [...data.points];
 }
 
-/** その山でそのビューの出題があるか（選択UIの活性判定に使う）。 */
-export function playableCount(
-  data: QuizData,
-  viewMode: 'map2d' | 'terrain3d',
-  mountainId?: string | null,
-): number {
-  return playablePoints(data, viewMode, mountainId).length;
+/** その山に出題できる地点があるか（選択UIの活性判定に使う）。 */
+export function playableCount(data: QuizData, mountainId?: string | null): number {
+  return playablePoints(data, mountainId).length;
 }
 
 export function findMountain(data: QuizData, mountainId: string): Mountain | null {

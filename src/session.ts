@@ -5,7 +5,16 @@
  * 画面側は表示と入出力だけを担当する。
  */
 import { mountainOf, playablePoints } from './data';
-import { MAX_SCORE, scoreGuess, type LatLng } from './scoring';
+import {
+  MAX_SCORE,
+  NO_WALK,
+  scoreGuess,
+  scoreWithTime,
+  timeFactor,
+  walkSeconds,
+  type LatLng,
+  type WalkEffort,
+} from './scoring';
 import type { Progress } from './storage';
 import type { GameMode, Mountain, QuizData, QuizPoint, ViewMode } from './types';
 
@@ -14,8 +23,22 @@ export const CHALLENGE_COUNT = 10;
 
 export interface Answer {
   pointId: string;
+  /** 実際に入る点数（時間の倍率を掛けたあと） */
   points: number;
+  /** 正解からの距離 [m] */
   distanceM: number;
+  /** 時間の倍率を掛ける前の、距離だけのスコア */
+  basePoints: number;
+  /** 画面を見ていた実時間 [秒] */
+  elapsedS: number;
+  /** 3Dビューで歩いた道のり [m]（時間を取る区間だけ） */
+  walkDistanceM: number;
+  /** その道のりを実際に歩いたときの推定所要時間 [秒] */
+  walkSecondsS: number;
+  /** 使った時間の合計 [秒]（実時間＋歩いた時間） */
+  totalTimeS: number;
+  /** その時間でのスコア倍率（1〜0） */
+  timeFactor: number;
 }
 
 export class SessionError extends Error {}
@@ -29,10 +52,8 @@ export interface SessionOptions {
 }
 
 /** 出題可能な地点が無いときに、なぜ無いのかを画面に出せるようにする。 */
-export function describeEmpty(viewMode: ViewMode): string {
-  return viewMode === 'map2d'
-    ? '画像付きの出題地点がまだありません。3D地形モードなら遊べる地点があるかもしれません。'
-    : '出題地点がまだありません。pipeline/ で出題データを生成してください。';
+export function describeEmpty(): string {
+  return '出題地点がまだありません。pipeline/ で出題データを生成してください。';
 }
 
 function shuffled<T>(items: readonly T[], random: () => number): T[] {
@@ -60,34 +81,46 @@ export class QuizSession {
     points: QuizPoint[],
     answers: Answer[] = [],
   ) {
-    if (points.length === 0) throw new SessionError(describeEmpty(viewMode));
+    if (points.length === 0) throw new SessionError(describeEmpty());
     this.points = points;
     this.answers = answers;
     this.cursor = answers.length;
   }
 
-  /** ランダムに重複なく10問（総数が10未満なら全問）。 */
+  /**
+   * ランダムに重複なく10問（総数が10未満なら全問）。
+   *
+   * **どの10問を出すかはランダム。出す順番はGPXルートの順。**
+   * 山を行ったり来たりする出題にすると、地形図の同じ場所を何度も探し直すことになり、
+   * 「歩いた記憶をたどる」というこのゲームの手がかりが働かない。
+   * 並びの正は出題データの並び（`quiz_points.json` は山ごとにルート順・docs/data-model.md）。
+   */
   static challenge(
     data: QuizData,
     viewMode: ViewMode,
     options: SessionOptions = {},
   ): QuizSession {
     const random = options.random ?? Math.random;
-    const pool = playablePoints(data, viewMode, options.mountainId);
-    const picked = shuffled(pool, random).slice(0, Math.min(CHALLENGE_COUNT, pool.length));
+    const pool = playablePoints(data, options.mountainId);
+    const order = new Map(pool.map((point, i) => [point.id, i]));
+    const picked = shuffled(pool, random)
+      .slice(0, Math.min(CHALLENGE_COUNT, pool.length))
+      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
     return new QuizSession(data, 'challenge10', viewMode, picked);
   }
 
-  /** 全地点を1問ずつ。順序は固定（id順）で、再開しても変わらない。 */
+  /** 全地点を1問ずつ。順序は固定（＝ルート順）で、再開しても変わらない。 */
   static completeAll(
     data: QuizData,
     viewMode: ViewMode,
     options: SessionOptions = {},
   ): QuizSession {
-    const pool = [...playablePoints(data, viewMode, options.mountainId)].sort((a, b) =>
-      a.id.localeCompare(b.id),
+    return new QuizSession(
+      data,
+      'complete_all',
+      viewMode,
+      playablePoints(data, options.mountainId),
     );
-    return new QuizSession(data, 'complete_all', viewMode, pool);
   }
 
   /**
@@ -103,7 +136,16 @@ export class QuizSession {
       points.push(point);
     }
     if (points.length === 0) return null;
-    const answers = progress.answers.slice(0, points.length);
+    // 時間の仕組みが無かった頃の進捗も読めるようにする（欠けた項目は埋める）
+    const answers = progress.answers.slice(0, points.length).map((a) => ({
+      ...a,
+      basePoints: a.basePoints ?? a.points,
+      elapsedS: a.elapsedS ?? 0,
+      walkDistanceM: a.walkDistanceM ?? 0,
+      walkSecondsS: a.walkSecondsS ?? 0,
+      totalTimeS: a.totalTimeS ?? 0,
+      timeFactor: a.timeFactor ?? 1,
+    }));
     return new QuizSession(data, progress.mode, progress.viewMode, points, answers);
   }
 
@@ -133,8 +175,17 @@ export class QuizSession {
     return point ? mountainOf(this.data, point) : null;
   }
 
-  /** 推測を採点して記録する。次の問題へは進めない（結果表示を挟むため）。 */
-  submit(guess: LatLng): Answer {
+  /**
+   * 推測を採点して記録する。次の問題へは進めない（結果表示を挟むため）。
+   *
+   * **点数は「距離のスコア × 時間の倍率」**（機能E-2）。時間は
+   * *画面を見ていた実時間* と *3Dで歩いたぶんの推定所要時間* の合計で、
+   * 持ち時間（5分）を使い切ると0点になる。その場で読めるほど高得点。
+   *
+   * @param walk 3Dビューで歩いた量（時間を取る区間だけ）
+   * @param elapsedS この問題を表示してからの実時間 [秒]
+   */
+  submit(guess: LatLng, walk: WalkEffort = NO_WALK, elapsedS = 0): Answer {
     const point = this.current();
     if (!point) throw new SessionError('出題が終わっています');
     const mountain = mountainOf(this.data, point);
@@ -144,7 +195,19 @@ export class QuizSession {
       mountain.max_distance_m,
       mountain.scoring_k,
     );
-    const answer: Answer = { pointId: point.id, points: score, distanceM };
+    const walkS = walkSeconds(walk);
+    const totalTimeS = Math.max(0, elapsedS) + walkS;
+    const answer: Answer = {
+      pointId: point.id,
+      points: scoreWithTime(score, totalTimeS),
+      distanceM,
+      basePoints: score,
+      elapsedS: Math.max(0, elapsedS),
+      walkDistanceM: walk.distanceM,
+      walkSecondsS: walkS,
+      totalTimeS,
+      timeFactor: timeFactor(totalTimeS),
+    };
     this.answers.push(answer);
     return answer;
   }

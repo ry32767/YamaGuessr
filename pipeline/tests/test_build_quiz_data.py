@@ -56,7 +56,8 @@ def test_dataset_version_is_utc_iso() -> None:
 
 
 def test_max_distance_is_half_the_bbox_diagonal(tmp_path: Path) -> None:
-    route = build_route(legs=((0.0, 800.0), (90.0, 600.0)), step_m=10.0)
+    route = build_route(start_lat=34.185, start_lon=136.109,
+                        legs=((0.0, 800.0), (90.0, 600.0)), step_m=10.0)
     gpx = write_gpx(tmp_path / "r.gpx", route)
     d = bq.max_distance_from_gpx(gpx, factor=0.5)
     # bbox は 800m × 600m → 対角 1000m → ×0.5 = 500m
@@ -64,7 +65,8 @@ def test_max_distance_is_half_the_bbox_diagonal(tmp_path: Path) -> None:
 
 
 def test_max_distance_factor_is_adjustable(tmp_path: Path) -> None:
-    route = build_route(legs=((0.0, 800.0), (90.0, 600.0)), step_m=10.0)
+    route = build_route(start_lat=34.185, start_lon=136.109,
+                        legs=((0.0, 800.0), (90.0, 600.0)), step_m=10.0)
     gpx = write_gpx(tmp_path / "r.gpx", route)
     assert bq.max_distance_from_gpx(gpx, 1.0) == pytest.approx(
         bq.max_distance_from_gpx(gpx, 0.5) * 2, rel=0.01)
@@ -168,12 +170,35 @@ def test_missing_image_is_a_hard_error(tmp_path: Path) -> None:
 
 
 def test_gpx_determines_max_distance(tmp_path: Path) -> None:
-    route = build_route(legs=((0.0, 800.0), (90.0, 600.0)), step_m=10.0)
+    route = build_route(start_lat=34.185, start_lon=136.109,
+                        legs=((0.0, 800.0), (90.0, 600.0)), step_m=10.0)
     gpx = write_gpx(tmp_path / "r.gpx", route)
     confirmed = _confirmed(tmp_path, [_point(1)])
     meta = bq.run(str(confirmed), gpx=str(gpx),
                   public_dir=str(tmp_path / "public"), quiet=True)
     assert meta["mountain"]["max_distance_m"] == pytest.approx(500.0, rel=0.02)
+
+
+def test_gpx_of_another_mountain_is_rejected(tmp_path: Path) -> None:
+    """別の山のGPXを選んだまま実行したら止める（地点は正しく線だけ他の山、を防ぐ）。"""
+    # 地点は 34.18/136.10 付近、GPXは遠く離れた場所
+    far = build_route(start_lat=35.37, start_lon=134.53,
+                      legs=((0.0, 500.0),), step_m=10.0)
+    gpx = write_gpx(tmp_path / "other.gpx", far)
+    confirmed = _confirmed(tmp_path, [_point(1), _point(2)])
+    with pytest.raises(bq.BuildError, match="GPX"):
+        bq.run(str(confirmed), gpx=str(gpx),
+               public_dir=str(tmp_path / "public"), quiet=True)
+
+
+def test_matching_gpx_records_how_close_the_points_are(tmp_path: Path) -> None:
+    route = build_route(start_lat=34.185, start_lon=136.109,
+                        legs=((45.0, 600.0),), step_m=10.0)
+    gpx = write_gpx(tmp_path / "r.gpx", route)
+    confirmed = _confirmed(tmp_path, [_point(1), _point(2)])
+    meta = bq.run(str(confirmed), gpx=str(gpx),
+                  public_dir=str(tmp_path / "public"), quiet=True)
+    assert meta["track"]["match_offset_m"] < bq.TRACK_MATCH_MAX_M
 
 
 # ---------------------------------------------------------------------------

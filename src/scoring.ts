@@ -79,3 +79,84 @@ export function scoreGuess(
   const distanceM = distanceMeters(actual, guess);
   return { distanceM, score: scoreForDistance(distanceM, maxDistanceM, k) };
 }
+
+// ---------------------------------------------------------------------------
+// 移動のコスト（機能E-2）
+// ---------------------------------------------------------------------------
+/**
+ * 3Dビューでルートを歩いた量。**歩いた道のり**（往復すれば足し算）と、
+ * その間の累積の登り・下り。
+ */
+export interface WalkEffort {
+  distanceM: number;
+  ascentM: number;
+  descentM: number;
+}
+
+export const NO_WALK: WalkEffort = { distanceM: 0, ascentM: 0, descentM: 0 };
+
+/**
+ * 歩く速さの目安。**実際に山を歩いたらどれくらいかかるか**を出すための値で、
+ * 登山地図の標準コースタイム（水平4km/h・登り350m/h・下り500m/h）に合わせている。
+ * 平地の距離と登り下りを足し合わせる素朴な式だが、
+ * 「登り返しは高くつく」という山の感覚は再現できる。
+ */
+export const WALK_SPEED_M_PER_MIN = 4000 / 60;
+export const ASCENT_M_PER_MIN = 350 / 60;
+export const DESCENT_M_PER_MIN = 500 / 60;
+
+/** 歩いた道のりを、実際に山で歩いたときの所要時間 [分] に直す。 */
+export function hikingMinutes(effort: WalkEffort): number {
+  return (
+    Math.max(0, effort.distanceM) / WALK_SPEED_M_PER_MIN +
+    Math.max(0, effort.ascentM) / ASCENT_M_PER_MIN +
+    Math.max(0, effort.descentM) / DESCENT_M_PER_MIN
+  );
+}
+
+/** 歩いた道のりを、実際に山で歩いたときの所要時間 [秒] に直す。 */
+export function walkSeconds(effort: WalkEffort): number {
+  return hikingMinutes(effort) * 60;
+}
+
+// ---------------------------------------------------------------------------
+// 時間（機能E-2）
+// ---------------------------------------------------------------------------
+/**
+ * 持ち時間 [秒]。**これを使い切ると0点**。
+ *
+ * 「その場の地形を読んで当てる」ゲームなので、考え込むほど・歩き回るほど
+ * 点が減る。5分あれば見回して地形図を突き合わせるには十分で、
+ * 「とりあえず全部歩いてみる」は割に合わない、という重さに置いた。
+ */
+export const TIME_LIMIT_S = 300;
+
+/**
+ * 使った時間 [秒] に対するスコアの倍率（1→0）。
+ *
+ * **直線で減らす。** 指数だと最初の数十秒でごっそり減って理不尽に見えるうえ、
+ * 残り時間バーの見た目と実際の減りが合わない。直線なら
+ * 「バーが半分＝点も半分」で、画面を見たまま判断できる。
+ */
+export function timeFactor(seconds: number): number {
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.max(0, Math.min(1, 1 - Math.max(0, seconds) / TIME_LIMIT_S));
+}
+
+/** 距離のスコアに、使った時間の倍率を掛けた最終得点。 */
+export function scoreWithTime(basePoints: number, seconds: number): number {
+  return Math.round(Math.max(0, basePoints) * timeFactor(seconds));
+}
+
+/** 残り時間 [秒]。 */
+export function remainingSeconds(seconds: number): number {
+  return Math.max(0, TIME_LIMIT_S - Math.max(0, seconds));
+}
+
+/** `秒 → "m:ss"`。タイマー表示に使う。 */
+export function formatClock(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}

@@ -139,7 +139,9 @@
   </label>
   <span class="spacer"></span>
   <span class="counts" id="counts">未読み込み</span>
-  <button class="primary" id="exportBtn" disabled>書き出し</button>
+  <span class="counts" id="saveNote"></span>
+  <button id="exportBtn" disabled>ファイルに書き出す</button>
+  <button class="primary" id="saveBtn" disabled hidden>studioに保存</button>
 </header>
 
 <main>
@@ -149,13 +151,13 @@
   <aside id="panel">
     <p class="empty" id="empty">
       <b>使い方</b><br>
-      1. リポジトリのルートで <code>python -m http.server</code> を実行し、
-         <code>/pipeline/review.html</code> を開く<br>
+      1. studio（<code>python pipeline/studio.py</code>）の「レビュー」から開く<br>
       2. <code>pipeline/data/</code> の candidates.json と library/index.json を自動で読み込む<br>
       3. 地図のピンをクリックして地点を選ぶ<br>
       4. 右の一覧から、<b>その地点で撮った画像</b>をクリックして割り当てる（複数可）<br>
       5. いらない候補は <b>R</b> で却下。地図の空白を <b>Shift+クリック</b> で地点を手動追加<br>
-      6. 「書き出し」で confirmed_points.json を保存<br><br>
+      6. 「studioに保存」を押すと <code>pipeline/data/confirmed_points.json</code> に直接書かれる。
+         studioに戻って次の工程へ進めます<br><br>
       画像が無いままの地点は、3D地形だけで出題する地点になります。
     </p>
     <div id="detail" hidden></div>
@@ -498,6 +500,7 @@ function updateCounts() {
       (state.library.length ? '' : ' <span style="color:var(--warn)">画像ライブラリ未生成</span>')
     : '未読み込み';
   document.getElementById('exportBtn').disabled = adopted === 0;
+  document.getElementById('saveBtn').disabled = adopted === 0;
   document.getElementById('legend').innerHTML = Object.keys(TYPE_LABELS)
     .map((t) => `<div><i style="background:${TYPE_COLORS[t]}"></i>${TYPE_LABELS[t]}</div>`)
     .join('') +
@@ -643,6 +646,57 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+// --- studio に直接保存する -------------------------------------------------
+// ダウンロードして自分で置き直す作業を挟まないため。studio から開いたときだけ出す。
+function note(message, ok) {
+  const el = document.getElementById('saveNote');
+  el.textContent = message;
+  el.style.color = ok ? 'var(--ok)' : 'var(--warn)';
+}
+
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  const data = buildConfirmed();
+  if (!data) return;
+  const button = document.getElementById('saveBtn');
+  button.disabled = true;
+  note('保存しています…', true);
+  try {
+    const res = await fetch('/api/confirmed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      note(result.error || '保存できませんでした', false);
+      return;
+    }
+    note(`${result.path} に${result.point_count}地点を保存しました`, true);
+  } catch (e) {
+    note('studioに繋がりません（起動していますか）', false);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+/** studio から開かれたか。開かれていれば保存ボタンを出し、山ID・山名を引き継ぐ。 */
+async function connectStudio() {
+  const params = new URLSearchParams(location.search);
+  for (const [key, id] of [['mountain_id', 'mountainId'], ['mountain_name', 'mountainName']]) {
+    const value = params.get(key);
+    if (value) document.getElementById(id).value = value;
+  }
+  try {
+    const res = await fetch('/api/state', { cache: 'no-store' });
+    if (!res.ok) return;
+    await res.json();
+  } catch (_) {
+    return;   // studio 以外（python -m http.server など）から開かれている
+  }
+  document.getElementById('saveBtn').hidden = false;
+  document.getElementById('exportBtn').classList.remove('primary');
+}
+
 document.getElementById('libraryFilter').addEventListener('change', (e) => {
   state.libraryFilter = e.target.value;
   renderLibrary();
@@ -654,6 +708,7 @@ window.__review = { state, buildConfirmed, addManualPoint, select, setStatus,
 
 updateCounts();
 autoLoad();
+connectStudio();
 </script>
 </body>
 </html>

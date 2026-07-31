@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_SCORE, distanceMeters, scoreForDistance, scoreGuess } from './scoring';
+import {
+  MAX_SCORE,
+  NO_WALK,
+  TIME_LIMIT_S,
+  distanceMeters,
+  formatClock,
+  hikingMinutes,
+  remainingSeconds,
+  scoreForDistance,
+  scoreGuess,
+  scoreWithTime,
+  timeFactor,
+  walkSeconds,
+} from './scoring';
 
 const MAX = 850;
 
@@ -114,5 +127,70 @@ describe('scoreGuess', () => {
     );
     expect(r.score).toBe(0);
     expect(r.distanceM).toBeGreaterThan(300_000);
+  });
+});
+
+describe('歩いた時間の見積り（機能E-2）', () => {
+  it('歩かなければ0', () => {
+    expect(hikingMinutes(NO_WALK)).toBe(0);
+    expect(walkSeconds(NO_WALK)).toBe(0);
+  });
+
+  it('平地は4km/hで見積もる', () => {
+    // 1km 平坦 → 15分
+    expect(hikingMinutes({ distanceM: 1000, ascentM: 0, descentM: 0 })).toBeCloseTo(15, 3);
+    expect(walkSeconds({ distanceM: 1000, ascentM: 0, descentM: 0 })).toBeCloseTo(900, 1);
+  });
+
+  it('同じ距離でも登りのほうが高くつく（山の感覚）', () => {
+    const flat = hikingMinutes({ distanceM: 200, ascentM: 0, descentM: 0 });
+    const up = hikingMinutes({ distanceM: 200, ascentM: 100, descentM: 0 });
+    const down = hikingMinutes({ distanceM: 200, ascentM: 0, descentM: 100 });
+    expect(up).toBeGreaterThan(down);
+    expect(down).toBeGreaterThan(flat);
+    // 登り100mで約17分（350m/h）
+    expect(up - flat).toBeCloseTo(100 / (350 / 60), 3);
+  });
+
+  it('負の値は0として扱う（壊れた入力で時間が戻らない）', () => {
+    expect(walkSeconds({ distanceM: -500, ascentM: -100, descentM: -100 })).toBe(0);
+  });
+});
+
+describe('持ち時間（機能E-2）', () => {
+  it('使っていなければ満点、5分で0点', () => {
+    expect(timeFactor(0)).toBe(1);
+    expect(timeFactor(TIME_LIMIT_S)).toBe(0);
+    expect(timeFactor(TIME_LIMIT_S + 100)).toBe(0);
+    expect(scoreWithTime(5000, 0)).toBe(5000);
+    expect(scoreWithTime(5000, TIME_LIMIT_S)).toBe(0);
+  });
+
+  it('直線で減る（バーの見た目と点の減りが一致する）', () => {
+    expect(timeFactor(TIME_LIMIT_S / 2)).toBeCloseTo(0.5, 6);
+    expect(scoreWithTime(5000, 60)).toBe(4000);   // 1分で 80%
+    expect(scoreWithTime(5000, 150)).toBe(2500);  // 2分半で 50%
+  });
+
+  it('時間が増えるほど点は減る（単調非増加）', () => {
+    let previous = Infinity;
+    for (let t = 0; t <= 400; t += 10) {
+      const value = scoreWithTime(5000, t);
+      expect(value).toBeLessThanOrEqual(previous);
+      previous = value;
+    }
+  });
+
+  it('残り時間と時計表示', () => {
+    expect(remainingSeconds(0)).toBe(TIME_LIMIT_S);
+    expect(remainingSeconds(TIME_LIMIT_S + 50)).toBe(0);
+    expect(formatClock(0)).toBe('0:00');
+    expect(formatClock(65)).toBe('1:05');
+    expect(formatClock(300)).toBe('5:00');
+  });
+
+  it('壊れた入力では0点にする（点が増える方向に倒れない）', () => {
+    expect(timeFactor(Number.NaN)).toBe(0);
+    expect(timeFactor(-100)).toBe(1);
   });
 });

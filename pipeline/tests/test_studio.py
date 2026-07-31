@@ -230,6 +230,55 @@ def test_save_upload_cannot_escape_the_directory(monkeypatch: pytest.MonkeyPatch
     assert ".." not in info["path"]
 
 
+# ---------------------------------------------------------------------------
+# レビュー画面からの保存（画面だけで完結させるための経路）
+# ---------------------------------------------------------------------------
+def _confirmed(**kw: Any) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "mountain": {"id": "odaigahara-2026-06-11", "name": "大台ヶ原"},
+        "generated_at": "2026-07-31T00:00:00Z",
+        "points": [
+            {"id": "odaigahara-2026-06-11-001", "type": "peak",
+             "lat": 34.18, "lon": 136.10, "source": "auto", "images": []},
+        ],
+    }
+    data.update(kw)
+    return data
+
+
+def test_save_confirmed_writes_into_pipeline_data(monkeypatch: pytest.MonkeyPatch,
+                                                  tmp_path: Path) -> None:
+    monkeypatch.setattr(studio, "ROOT", tmp_path)
+    monkeypatch.setattr(studio, "CONFIRMED_PATH", tmp_path / "pipeline/data/confirmed_points.json")
+    info = studio.save_confirmed(_confirmed())
+    assert info["path"] == "pipeline/data/confirmed_points.json"
+    assert info["point_count"] == 1
+    saved = json.loads((tmp_path / "pipeline/data/confirmed_points.json").read_text("utf-8"))
+    assert saved["mountain"]["name"] == "大台ヶ原"
+    assert saved["points"][0]["lat"] == 34.18
+
+
+def test_save_confirmed_rejects_broken_payloads(monkeypatch: pytest.MonkeyPatch,
+                                                tmp_path: Path) -> None:
+    monkeypatch.setattr(studio, "CONFIRMED_PATH", tmp_path / "confirmed_points.json")
+    for broken in [
+        "文字列",
+        _confirmed(mountain={"id": "", "name": ""}),
+        _confirmed(points=[]),
+        _confirmed(points=[{"id": "x"}]),          # 緯度経度が無い
+    ]:
+        with pytest.raises(ValueError):
+            studio.save_confirmed(broken)
+    assert not (tmp_path / "confirmed_points.json").exists()
+
+
+def test_review_page_can_load_its_map_library() -> None:
+    """review.html が使う地図ライブラリを studio が配れること（配れないと地図が出ない）。"""
+    assert (studio.ROOT / studio.VENDOR_PREFIX / "maplibre-gl.js").exists()
+    html = (studio.PIPELINE / "review.html").read_text(encoding="utf-8")
+    assert f"../{studio.VENDOR_PREFIX}maplibre-gl.js" in html
+
+
 def test_all_steps_are_buildable_or_reject_cleanly() -> None:
     """UIが投げうる全工程が、成功するか ValueError で止まるかのどちらかになる。"""
     params = {

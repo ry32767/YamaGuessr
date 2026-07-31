@@ -5,7 +5,7 @@
  * 切り替えで、状態はこのモジュールが持つ。
  */
 import { QuizDataError, loadQuizData, playableCount } from './data';
-import { MAX_SCORE } from './scoring';
+import { MAX_SCORE, formatClock } from './scoring';
 import { CHALLENGE_COUNT, QuizSession, SessionError, describeEmpty } from './session';
 import { isSoundEnabled, toggleSound } from './sound';
 import {
@@ -52,12 +52,12 @@ const VIEW_CHOICES: Choice<ViewMode>[] = [
   {
     value: 'map2d',
     name: '地形図当て',
-    desc: '写真1枚だけを手がかりに、地形図上の位置を当てる',
+    desc: 'その場に立った一人称視点（写真があれば写真も）を手がかりに当てる',
   },
   {
     value: 'terrain3d',
     name: '3D地形当て',
-    desc: '写真に加えて周辺の3D地形を見回せる。地名は出ない',
+    desc: '地形モデルを外から回して眺め、その形だけで当てる。地名は出ない',
   },
 ];
 
@@ -219,7 +219,7 @@ class App {
         'p',
         { class: 'home__lead' },
         `登録されている地点は ${data.points.length} 箇所（${data.mountains.length} 山）。` +
-          '写真か3D地形を見て、国土地理院の地形図をタップして答えます。',
+          '3D地形（と写真）を見てから、国土地理院の地形図をタップして答えます。',
       ),
     );
 
@@ -239,7 +239,7 @@ class App {
     );
     append(home, this.trackGroup(data));
 
-    const playable = playableCount(data, this.viewMode, this.mountainId);
+    const playable = playableCount(data, this.mountainId);
 
     const start = el(
       'button',
@@ -250,7 +250,7 @@ class App {
     append(home, start);
 
     if (playable === 0) {
-      append(home, el('p', { class: 'muted tiny' }, describeEmpty(this.viewMode)));
+      append(home, el('p', { class: 'muted tiny' }, describeEmpty()));
     }
 
     // 中断した「全地点制覇」があれば再開を案内する
@@ -351,12 +351,12 @@ class App {
           null,
           'すべてのコース',
           `${data.mountains.length}コースからまぜて出題`,
-          playableCount(data, this.viewMode, null),
+          playableCount(data, null),
         ),
       );
     }
     for (const mountain of [...data.mountains].sort((a, b) => a.id.localeCompare(b.id))) {
-      const count = playableCount(data, this.viewMode, mountain.id);
+      const count = playableCount(data, mountain.id);
       append(
         list,
         makeButton(
@@ -502,6 +502,8 @@ class App {
         if (session.mode === 'complete_all') saveProgress(session.toProgress());
         this.renderChrome({ index: session.index, total: session.total });
       },
+      // 次の問題へ進んだときもヘッダーの「何問目」を合わせる
+      onQuestionShown: () => this.renderChrome({ index: session.index, total: session.total }),
       onFinished: () => this.showSummary(),
       onQuit: () => undefined,
     });
@@ -543,19 +545,46 @@ class App {
     const breakdown = el('div', { class: 'breakdown' });
     session.answered.forEach((answer, i) => {
       const point = session.pointAt(i);
+      const label = point ? (TYPE_LABELS[point.type] ?? point.type) : '—';
       append(
         breakdown,
         el(
           'div',
           { class: 'breakdown__row' },
           el('span', { class: 'idx' }, String(i + 1)),
-          el('span', {}, point ? (TYPE_LABELS[point.type] ?? point.type) : '—'),
+          el(
+            'span',
+            {},
+            label,
+            el(
+              'span',
+              { class: 'muted tiny' },
+              ` ${formatClock(answer.totalTimeS)} ×${Math.round(answer.timeFactor * 100)}%`,
+            ),
+          ),
           el('span', { class: 'dist' }, formatDistance(answer.distanceM)),
           el('span', { class: 'pts' }, formatPoints(answer.points)),
         ),
       );
     });
     append(summary, breakdown);
+
+    // 時間に何を使ったかは通しでも見せる（次に活かせる情報なので）
+    const timeTotal = session.answered.reduce((sum, a) => sum + a.totalTimeS, 0);
+    const walkTimeTotal = session.answered.reduce((sum, a) => sum + a.walkSecondsS, 0);
+    const walkTotal = session.answered.reduce((sum, a) => sum + a.walkDistanceM, 0);
+    append(
+      summary,
+      el(
+        'p',
+        { class: 'muted tiny' },
+        `かかった時間 合計 ${formatClock(timeTotal)}` +
+          (walkTotal > 0
+            ? `（うち3Dで歩いた ${formatDistance(walkTotal)}＝${formatClock(walkTimeTotal)}）`
+            : '') +
+          '。持ち時間は1問5分で、使うほど点が減ります。',
+      ),
+    );
 
     const buttons = el('div', { class: 'row' });
     const again = el('button', { class: 'btn btn--primary', type: 'button' }, 'もう一度');

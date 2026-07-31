@@ -24,6 +24,25 @@ export function angleDiffDeg(a: number, b: number): number {
   return ((((a - b) % 360) + 540) % 360) - 180;
 }
 
+/**
+ * `from` から `to` へ歩いたうち、**まだ見ていない区間**（時間を使う区間）。
+ *
+ * `exploredM` は「この問題でここまでは行った」という到達点。それより手前は
+ * **出題地点に来るまでに歩いた道か、さっき自分で見てきた道**なので、
+ * 覚えている前提で時間を取らない。戻るだけの移動は常に無料になる。
+ *
+ * @returns 課金する区間。無ければ null
+ */
+export function newGroundInterval(
+  fromM: number,
+  toM: number,
+  exploredM: number,
+): { from: number; to: number } | null {
+  const from = Math.max(Math.min(fromM, toM), exploredM);
+  const to = Math.max(Math.max(fromM, toM), exploredM);
+  return to - from > 1e-6 ? { from, to } : null;
+}
+
 export class RoutePath {
   /** 頂点の平面座標 [m]（トラック先頭を原点とする） */
   private readonly xs: number[] = [];

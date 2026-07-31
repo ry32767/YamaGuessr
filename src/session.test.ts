@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CHALLENGE_COUNT, QuizSession, SessionError } from './session';
+import { TIME_LIMIT_S } from './scoring';
 import { mountainView, playableCount } from './data';
 import type { QuizData, QuizPoint } from './types';
 
@@ -59,27 +60,36 @@ describe('QuizSession.challenge（機能H）', () => {
     const idsB = Array.from({ length: b.total }, (_, i) => b.pointAt(i)!.id);
     expect(idsA).not.toEqual(idsB);
   });
-});
 
-describe('出題対象の絞り込み（3D専用地点）', () => {
-  it('モード①は画像を持つ地点だけを出す', () => {
-    const data = makeData(10, (i) => i % 2 === 0);
-    const session = QuizSession.completeAll(data, 'map2d');
-    expect(session.total).toBe(5);
-    for (let i = 0; i < session.total; i += 1) {
-      expect(session.pointAt(i)!.image_paths?.length).toBeGreaterThan(0);
+  it('出題順は出題データの並び（＝GPXルート順）になる', () => {
+    const data = makeData(40);
+    const order = new Map(data.points.map((p, i) => [p.id, i]));
+    for (const seed of [1, 42, 12345]) {
+      const session = QuizSession.challenge(data, 'terrain3d', { random: seeded(seed) });
+      const indexes = Array.from(
+        { length: session.total },
+        (_, i) => order.get(session.pointAt(i)!.id)!,
+      );
+      expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
     }
   });
+});
 
-  it('モード②は画像が無い地点も出す', () => {
+describe('出題対象（どちらのモードも3D地形が手がかり）', () => {
+  it('画像が無い地点も地形図当てで出す（一人称3Dを統合したため）', () => {
+    const data = makeData(10, (i) => i % 2 === 0);
+    expect(QuizSession.completeAll(data, 'map2d').total).toBe(10);
+  });
+
+  it('3D地形当ても全地点を出す', () => {
     const data = makeData(10, (i) => i % 2 === 0);
     expect(QuizSession.completeAll(data, 'terrain3d').total).toBe(10);
   });
 
   it('出題できる地点が無ければ理由つきで失敗する', () => {
-    const data = makeData(4, () => false);
+    const data = makeData(0);
     expect(() => QuizSession.completeAll(data, 'map2d')).toThrow(SessionError);
-    expect(() => QuizSession.completeAll(data, 'map2d')).toThrow(/3D地形モード/);
+    expect(() => QuizSession.completeAll(data, 'map2d')).toThrow(/pipeline/);
   });
 });
 
@@ -96,6 +106,39 @@ describe('採点と進行', () => {
     const off = session.submit({ lat: q.lat + 0.005, lon: q.lon });
     expect(off.points).toBeLessThan(5000);
     expect(off.distanceM).toBeGreaterThan(500);
+  });
+
+  it('時間を使うほど点が減る（歩いた時間も一緒に乗る）', () => {
+    const data = makeData(3);
+    const instant = QuizSession.challenge(data, 'map2d', { random: seeded(11) });
+    const slow = QuizSession.challenge(data, 'map2d', { random: seeded(11) });
+    const p = instant.current()!;
+    const perfect = instant.submit({ lat: p.lat, lon: p.lon });
+    expect(perfect.points).toBe(perfect.basePoints);
+    expect(perfect.timeFactor).toBe(1);
+
+    // 同じ精度でも、60秒考えて300m歩いた（登り50m）ぶんだけ倍率が下がる
+    const paid = slow.submit(
+      { lat: p.lat, lon: p.lon },
+      { distanceM: 300, ascentM: 50, descentM: 0 },
+      60,
+    );
+    expect(paid.basePoints).toBe(perfect.basePoints);
+    expect(paid.elapsedS).toBe(60);
+    expect(paid.walkSecondsS).toBeGreaterThan(0);
+    expect(paid.totalTimeS).toBeCloseTo(60 + paid.walkSecondsS, 6);
+    expect(paid.timeFactor).toBeLessThan(1);
+    expect(paid.points).toBe(Math.round(paid.basePoints * paid.timeFactor));
+    expect(paid.points).toBeLessThan(perfect.points);
+  });
+
+  it('持ち時間を使い切ると0点', () => {
+    const session = QuizSession.challenge(makeData(2), 'map2d', { random: seeded(12) });
+    const p = session.current()!;
+    const answer = session.submit({ lat: p.lat, lon: p.lon }, undefined, TIME_LIMIT_S + 1);
+    expect(answer.basePoints).toBe(5000);
+    expect(answer.points).toBe(0);
+    expect(session.totalPoints).toBe(0);
   });
 
   it('合計点と達成率を出す', () => {
@@ -210,12 +253,12 @@ describe('コース（山）の絞り込み', () => {
     expect(session.total).toBe(4);
   });
 
-  it('playableCount がビューと山の組み合わせで数える', () => {
+  it('playableCount が山ごとに数える', () => {
     const data = multiMountain();
-    expect(playableCount(data, 'terrain3d', null)).toBe(10);
-    expect(playableCount(data, 'terrain3d', MOUNTAIN.id)).toBe(4);
-    expect(playableCount(data, 'map2d', 'kongo-2026-08-01')).toBe(6);
-    expect(playableCount(data, 'terrain3d', 'unknown')).toBe(0);
+    expect(playableCount(data, null)).toBe(10);
+    expect(playableCount(data, MOUNTAIN.id)).toBe(4);
+    expect(playableCount(data, 'kongo-2026-08-01')).toBe(6);
+    expect(playableCount(data, 'unknown')).toBe(0);
   });
 });
 

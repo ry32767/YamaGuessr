@@ -1,6 +1,20 @@
 {
- "dataset_version": "2026-07-29T14:59:31Z",
+ "dataset_version": "2026-07-31T10:09:11Z",
  "mountains": [
+  {
+   "id": "Sobudake-20250922",
+   "name": "蘇武岳",
+   "max_distance_m": 3996.2,
+   "scoring_k": 4.0,
+   "track_path": "data/tracks/Sobudake-20250922.json"
+  },
+  {
+   "id": "hyounosen-2026-07-17",
+   "name": "氷ノ山・鉢伏山・瀞川山",
+   "max_distance_m": 2454.9,
+   "scoring_k": 4.0,
+   "track_path": "data/tracks/hyounosen-2026-07-17.json"
+  },
   {
    "id": "odaigahara-2026-06-11",
    "name": "大台ヶ原・日出ヶ岳",
@@ -10,6 +24,618 @@
   }
  ],
  "points": [
+  {
+   "id": "Sobudake-20250922-001",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4635593,
+   "lon": 134.6028797,
+   "elevation_m": 232.1,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-002",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4651768,
+   "lon": 134.603447,
+   "elevation_m": 258.7,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-003",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4648555,
+   "lon": 134.6052558,
+   "elevation_m": 298.9,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-004",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4673556,
+   "lon": 134.6070744,
+   "elevation_m": 391.3,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-005",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4686863,
+   "lon": 134.6103867,
+   "elevation_m": 455.7,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-006",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4692062,
+   "lon": 134.6137248,
+   "elevation_m": 527.0,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-007",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.467741,
+   "lon": 134.6163502,
+   "elevation_m": 559.3,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-008",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4666162,
+   "lon": 134.6207055,
+   "elevation_m": 624.8,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-009",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4646836,
+   "lon": 134.6247781,
+   "elevation_m": 702.8,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-010",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4657389,
+   "lon": 134.6275585,
+   "elevation_m": 788.5,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-011",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4664012,
+   "lon": 134.6305203,
+   "elevation_m": 840.5,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-012",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4660905,
+   "lon": 134.6334793,
+   "elevation_m": 921.3,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-013",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4664003,
+   "lon": 134.6356921,
+   "elevation_m": 990.8,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-014",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4687215,
+   "lon": 134.6372382,
+   "elevation_m": 1043.6,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-015",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4700442,
+   "lon": 134.6379644,
+   "elevation_m": 1070.1,
+   "type": "peak",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-016",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4711453,
+   "lon": 134.6393449,
+   "elevation_m": 1031.9,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-017",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4739955,
+   "lon": 134.6402572,
+   "elevation_m": 1046.3,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-018",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4764188,
+   "lon": 134.6427876,
+   "elevation_m": 973.2,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-019",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4767932,
+   "lon": 134.6457799,
+   "elevation_m": 970.1,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-020",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4778918,
+   "lon": 134.6493228,
+   "elevation_m": 918.3,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-021",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.477627,
+   "lon": 134.6514101,
+   "elevation_m": 878.8,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-022",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4793658,
+   "lon": 134.6538948,
+   "elevation_m": 803.0,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-023",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4798847,
+   "lon": 134.6556286,
+   "elevation_m": 761.6,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-024",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4841879,
+   "lon": 134.6567998,
+   "elevation_m": 669.2,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-025",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4907332,
+   "lon": 134.6581897,
+   "elevation_m": 413.7,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-026",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4943861,
+   "lon": 134.6640384,
+   "elevation_m": 343.5,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-027",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4963528,
+   "lon": 134.6693553,
+   "elevation_m": 316.2,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-028",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4979358,
+   "lon": 134.6698747,
+   "elevation_m": 340.6,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "Sobudake-20250922-029",
+   "mountain_id": "Sobudake-20250922",
+   "lat": 35.4997094,
+   "lon": 134.6735303,
+   "elevation_m": 344.4,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-001",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3715834,
+   "lon": 134.5314964,
+   "elevation_m": 574.7,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-002",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3703881,
+   "lon": 134.527175,
+   "elevation_m": 610.5,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-003",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3699189,
+   "lon": 134.5231345,
+   "elevation_m": 656.6,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-004",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3693489,
+   "lon": 134.5211526,
+   "elevation_m": 681.5,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-005",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3702518,
+   "lon": 134.5183305,
+   "elevation_m": 722.7,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-006",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.369734,
+   "lon": 134.5158738,
+   "elevation_m": 886.9,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-007",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3687878,
+   "lon": 134.5139539,
+   "elevation_m": 920.4,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-008",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3660245,
+   "lon": 134.5113094,
+   "elevation_m": 976.5,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-009",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3656857,
+   "lon": 134.5093569,
+   "elevation_m": 1057.7,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-010",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3644568,
+   "lon": 134.5053774,
+   "elevation_m": 1198.3,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-011",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3638033,
+   "lon": 134.5038037,
+   "elevation_m": 1246.7,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-012",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3663908,
+   "lon": 134.5043421,
+   "elevation_m": 1296.4,
+   "type": "peak",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-013",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.369318,
+   "lon": 134.5051104,
+   "elevation_m": 1284.5,
+   "type": "peak",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-014",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3714241,
+   "lon": 134.5045537,
+   "elevation_m": 1249.2,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-015",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3728784,
+   "lon": 134.5041974,
+   "elevation_m": 1261.9,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-016",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3756988,
+   "lon": 134.506491,
+   "elevation_m": 1182.8,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-017",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3773486,
+   "lon": 134.5075928,
+   "elevation_m": 1188.8,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-018",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3787918,
+   "lon": 134.5078777,
+   "elevation_m": 1213.6,
+   "type": "peak",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-019",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.378956,
+   "lon": 134.5100449,
+   "elevation_m": 1193.5,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-020",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3800367,
+   "lon": 134.5123797,
+   "elevation_m": 1166.5,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-021",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.382504,
+   "lon": 134.5136735,
+   "elevation_m": 1050.0,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-022",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3840492,
+   "lon": 134.515844,
+   "elevation_m": 1018.7,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-023",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3854959,
+   "lon": 134.5167235,
+   "elevation_m": 1035.1,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-024",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3879646,
+   "lon": 134.5184695,
+   "elevation_m": 1047.0,
+   "type": "peak",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-025",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3889734,
+   "lon": 134.520962,
+   "elevation_m": 1021.1,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-026",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3899142,
+   "lon": 134.5231241,
+   "elevation_m": 1071.1,
+   "type": "peak",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-027",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3910405,
+   "lon": 134.5254872,
+   "elevation_m": 1027.5,
+   "type": "col",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-028",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3927008,
+   "lon": 134.5277959,
+   "elevation_m": 1063.7,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-029",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3941945,
+   "lon": 134.52912,
+   "elevation_m": 1106.2,
+   "type": "bend",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-030",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3945846,
+   "lon": 134.531132,
+   "elevation_m": 1116.8,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-031",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3950145,
+   "lon": 134.5343522,
+   "elevation_m": 1150.9,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-032",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3952777,
+   "lon": 134.5363681,
+   "elevation_m": 1219.3,
+   "type": "peak",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-033",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.393709,
+   "lon": 134.5372708,
+   "elevation_m": 1199.5,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-034",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3910573,
+   "lon": 134.5387072,
+   "elevation_m": 1101.2,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-035",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3895487,
+   "lon": 134.5413111,
+   "elevation_m": 1046.7,
+   "type": "ridge_start",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-036",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3900544,
+   "lon": 134.536624,
+   "elevation_m": 1003.7,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-037",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3908769,
+   "lon": 134.534534,
+   "elevation_m": 981.5,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-038",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3882712,
+   "lon": 134.5334818,
+   "elevation_m": 905.4,
+   "type": "ridge_view",
+   "source": "auto"
+  },
+  {
+   "id": "hyounosen-2026-07-17-039",
+   "mountain_id": "hyounosen-2026-07-17",
+   "lat": 35.3857011,
+   "lon": 134.5338014,
+   "elevation_m": 882.8,
+   "type": "ridge_view",
+   "source": "auto"
+  },
   {
    "id": "odaigahara-2026-06-11-001",
    "mountain_id": "odaigahara-2026-06-11",

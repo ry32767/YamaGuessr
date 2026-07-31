@@ -5,6 +5,7 @@
  * ポインタが使えない場合に備え、地図にフォーカスして Enter でも地点を置ける。
  */
 import maplibregl, { Map as MapLibreMap, Marker, type GeoJSONSource } from 'maplibre-gl';
+import type { Feature } from 'geojson';
 import type { LatLng } from '../scoring';
 import type { TrackFeature } from '../types';
 import { GSI_ATTRIBUTION, baseMapStyle } from './style';
@@ -137,12 +138,12 @@ export class AnswerMap {
     this.whenStyleReady(() => {
       const source = this.map.getSource(SOURCE_TRACK);
       if (source && 'setData' in source) {
-        (source as GeoJSONSource).setData(track as unknown as GeoJSON.Feature);
+        (source as GeoJSONSource).setData(track as unknown as Feature);
         return;
       }
       this.map.addSource(SOURCE_TRACK, {
         type: 'geojson',
-        data: track as unknown as GeoJSON.Feature,
+        data: track as unknown as Feature,
       });
       this.map.addLayer({
         id: LAYER_TRACK_HALO,

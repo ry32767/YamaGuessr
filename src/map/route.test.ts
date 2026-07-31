@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RoutePath, angleDiffDeg } from './route';
+import { RoutePath, angleDiffDeg, newGroundInterval } from './route';
 import { distanceMeters } from '../scoring';
 import type { TrackFeature } from '../types';
 
@@ -111,5 +111,26 @@ describe('RoutePath', () => {
       const actual = distanceMeters({ lat: LAT0, lon: LON0 }, p);
       expect(Math.abs(actual - along)).toBeLessThan(0.5 + along * 0.002);
     }
+  });
+});
+
+describe('newGroundInterval（時間を取る区間）', () => {
+  it('先へ進んだぶんだけ数える', () => {
+    expect(newGroundInterval(100, 180, 100)).toEqual({ from: 100, to: 180 });
+  });
+
+  it('出題地点より手前に戻るのは無料（もう歩いてきた道）', () => {
+    expect(newGroundInterval(100, 20, 100)).toBeNull();
+    expect(newGroundInterval(20, 60, 100)).toBeNull();
+  });
+
+  it('一度行った先へ戻るのも無料（さっき見た道）', () => {
+    expect(newGroundInterval(180, 120, 180)).toBeNull();
+    // そこからさらに先へ出た区間だけ数える
+    expect(newGroundInterval(120, 200, 180)).toEqual({ from: 180, to: 200 });
+  });
+
+  it('同じ場所なら区間なし', () => {
+    expect(newGroundInterval(100, 100, 100)).toBeNull();
   });
 });

@@ -18,6 +18,7 @@ import argparse
 import http.server
 import json
 import mimetypes
+import os
 import shlex
 import subprocess
 import sys
@@ -52,6 +53,12 @@ MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
 #: 画面から実行できる工程。argv は studio.html 側の入力から組み立てる
 STEPS = ("library", "detect", "frames", "build", "adopt_all", "telemetry", "match")
 
+#: レビュー画面が保存する確定データの置き場
+CONFIRMED_PATH = DATA_DIR / "confirmed_points.json"
+
+#: レビュー画面（review.html）が使う地図ライブラリ。studio から配る
+VENDOR_PREFIX = "node_modules/maplibre-gl/dist/"
+
 
 class Job:
     """1回のコマンド実行。出力を貯めて画面から読み出せるようにする。"""
@@ -81,11 +88,14 @@ class Job:
         return self
 
     def _run(self) -> None:
+        # 子プロセスにもUTF-8で喋らせる。Windowsの既定（cp932）のまま出させると、
+        # こちらがUTF-8として読むので日本語のログが化ける（画面に「�」が並ぶ）。
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
         try:
             proc = subprocess.Popen(
                 self.argv, cwd=str(ROOT), stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                errors="replace", bufsize=1,
+                errors="replace", bufsize=1, env=env,
             )
         except OSError as e:
             self.lines.append(f"起動できませんでした: {e}")
@@ -144,6 +154,36 @@ def save_upload(kind: str, name: str, data: bytes) -> dict[str, Any]:
     dest.write_bytes(data)
     return {"path": dest.relative_to(ROOT).as_posix(), "name": dest.name,
             "size_mb": round(len(data) / 1024 / 1024, 2)}
+
+
+def save_confirmed(data: Any) -> dict[str, Any]:
+    """レビュー画面から送られた確定地点を `pipeline/data/confirmed_points.json` に書く。
+
+    **ダウンロードを挟まないためにある。** ブラウザに落として自分で置き直す作業は、
+    画面だけで完結させるという studio の目的から外れる（置き場所を間違えれば
+    次の工程が古いデータを読む）。
+    """
+    if not isinstance(data, dict):
+        raise ValueError("確定データの形が違います")
+    mountain = data.get("mountain")
+    points = data.get("points")
+    if not isinstance(mountain, dict) or not mountain.get("id") or not mountain.get("name"):
+        raise ValueError("山IDと山名を入力してください")
+    if not isinstance(points, list) or not points:
+        raise ValueError("採用された地点がありません")
+    for point in points:
+        if not isinstance(point, dict) or "lat" not in point or "lon" not in point:
+            raise ValueError("地点に緯度経度がありません")
+    CONFIRMED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIRMED_PATH.write_text(
+        json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    with_images = sum(1 for p in points if p.get("images"))
+    return {
+        "path": CONFIRMED_PATH.relative_to(ROOT).as_posix(),
+        "point_count": len(points),
+        "with_images": with_images,
+    }
 
 
 def list_state() -> dict[str, Any]:
@@ -352,9 +392,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             offset = int((query.get("offset") or ["0"])[0])
             self._json(job.snapshot(offset))
             return
-        # レビューツールと中間データ・公開データをそのまま配る
+        # レビューツールと中間データ・公開データ、レビューが使う地図ライブラリを配る。
+        # （地図ライブラリを配らないと、review.html を studio から開いたとき地図が出ない）
         rel = route.lstrip("/")
-        if rel.startswith(("pipeline/", "public/")):
+        if rel.startswith(("pipeline/", "public/", VENDOR_PREFIX)):
             self._file(ROOT / rel)
             return
         self.send_error(404)
@@ -367,7 +408,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/api/upload":
             self._handle_upload(parsed)
             return
-        if parsed.path != "/api/run":
+        if parsed.path not in ("/api/run", "/api/confirmed"):
             self.send_error(404)
             return
         length = int(self.headers.get("Content-Length") or 0)
@@ -375,6 +416,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             params = json.loads(self.rfile.read(length).decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._json({"error": "リクエストを解釈できませんでした"}, 400)
+            return
+        if parsed.path == "/api/confirmed":
+            try:
+                self._json(save_confirmed(params))
+            except (ValueError, OSError) as e:
+                self._json({"error": str(e)}, 400)
             return
         step = params.get("step")
         if step not in STEPS:

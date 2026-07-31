@@ -144,6 +144,32 @@ def build_points(confirmed: dict[str, Any], images_dir: Optional[Path],
     return out
 
 
+#: 地点とGPXがこれ以上離れていたら、別の山のGPXを選んでいるとみなす [m]
+TRACK_MATCH_MAX_M = 1000.0
+
+
+def check_track_matches_points(gpx_path: str | Path,
+                               points: Sequence[dict[str, Any]]) -> float:
+    """GPXがこの山の地点と噛み合っているかを確かめ、地点→ルートの中央値距離を返す。
+
+    **別の山のGPXを選んだまま実行する事故を止めるため。** 地点は正しく、
+    地形図に描くルートだけ他の山、という壊れ方は画面を見ても気づきにくい
+    （どちらも「それらしい線」に見える）。
+    """
+    if not points:
+        return 0.0
+    polyline = load_gpx(gpx_path).polyline
+    offsets = sorted(polyline.snap(p["lat"], p["lon"]).distance_m for p in points)
+    median = offsets[len(offsets) // 2]
+    if median > TRACK_MATCH_MAX_M:
+        raise BuildError(
+            f"選んだGPXがこの山の地点と合っていません"
+            f"（地点からルートまで中央値 {median / 1000:.1f} km）。"
+            "GPXの選択を確認してください"
+        )
+    return median
+
+
 def write_track(gpx_path: str | Path, public_dir: Path, mountain_id: str,
                 tolerance_m: float = DEFAULT_TRACK_TOLERANCE_M) -> dict[str, Any]:
     """GPXを簡略化して、地形図に描くためのGeoJSONを書き出す。
@@ -224,7 +250,10 @@ def run(confirmed_path: str, gpx: Optional[str] = None,
 
     track_info: Optional[dict[str, Any]] = None
     if gpx:
+        # 別の山のGPXを選んでいたらここで止まる（地点だけ正しく線が別の山、を防ぐ）
+        offset_m = check_track_matches_points(gpx, points)
         track_info = write_track(gpx, public, mountain["id"], track_tolerance_m)
+        track_info["match_offset_m"] = round(offset_m, 1)
         mountain["track_path"] = track_info["path"]
 
     existing: Optional[dict[str, Any]] = None

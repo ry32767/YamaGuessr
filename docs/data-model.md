@@ -84,12 +84,14 @@ erDiagram
 | `Point.lat/lon` | **GPXルート上にスナップ済みの座標**（生GPSではない。理由は[spec.md](spec.md)の設計判断表） |
 | `Point.type` | `bend`(ルート屈曲) / `ridge_view`(尾根谷が見える) / `ridge_start`(尾根に乗り始め) / `peak` / `col` / `manual`(手動追加) / `photo`(写真1枚から作った地点) |
 | `Point.elevation_m` | 地理院DEM由来の標高。**3Dビューで視点をこの高さに置く**ためにフロントへ渡す（タイル読み込みを待たずに正しい視点を作れる） |
-| `Point.image_paths` | **任意・複数可**。レビューで人が割り当てた画像。省略／空の地点は**モード②（3D地形）専用**として出題する（[spec.md](spec.md)の設計判断表）。画像の出所（動画名・切り出し秒）は公開しない |
-| `Point.heading_deg` | カメラ方位。モード②の3Dビュー初期視点に使用。算出不能な場合は省略し、`heading_route_deg`（進行方位）で代用する |
+| `Point.image_paths` | **任意・複数可**。レビューで人が割り当てた画像。省略／空でも出題できる（どちらのモードも3D地形が手がかりで、画像はモード①の追加の手がかり）。画像の出所（動画名・切り出し秒）は公開しない |
+| `Point.heading_deg` | カメラ方位。モード①の一人称3Dの初期視点に使用。算出不能な場合は省略し、`heading_route_deg`（進行方位）で代用する |
 | `Point.heading_route_deg` | GPXルートの進行方位。`heading_deg`が無い地点のフォールバック |
 | `Point.source` | `auto`（自動検出→採用）／`manual`（レビュー時に人間が追加） |
 
 **含めないもの**：生GPS座標、`snap_distance_m`、品質スコア（`blur_score`等）、`aux1`/`aux2`。これらは中間ファイル（`pipeline/data/`）に留め、公開JSONには出さない（不要な情報を配信しないため）。
+
+**`points`の並び順は「山ごとにGPXルートの順」**（`build_quiz_data.py` が `(mountain_id, id)` で並べ、`id`の連番はレビュー／一括採用が**ルート上の距離順**に振る）。フロントはこの並びをそのまま出題順に使う——10問チャレンジは**どの10問かはランダムだが、出す順番はルート順**（[spec.md](spec.md) 機能H）。並び順を変えるときは両方を直す。
 
 ## トラック（`public/data/tracks/{mountain_id}.json`）
 

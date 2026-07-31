@@ -6,6 +6,12 @@
  * 「500mリングの中には入った」という理解のしかたがこの題材でだけ意味を持つ。
  */
 import { Marker, type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
+import type {
+  Feature as GeoJsonFeature,
+  FeatureCollection,
+  GeoJsonProperties,
+  Geometry,
+} from 'geojson';
 import type { LatLng } from '../scoring';
 
 /** 描くリングの半径 [m]。中心から外へ。 */
@@ -23,7 +29,7 @@ const CONTOUR = '#a9793f';
  *  自前の等幅フォント（DESIGN.md の署名）を使えない。 */
 const labelMarkers = new WeakMap<MapLibreMap, Marker[]>();
 
-type Feature = GeoJSON.Feature<GeoJSON.Geometry, GeoJSON.GeoJsonProperties>;
+type Feature = GeoJsonFeature<Geometry, GeoJsonProperties>;
 
 /** 中心から半径 radiusM の円を、測地的におおよそ正しい多角形として作る。 */
 export function circlePolygon(center: LatLng, radiusM: number, steps = 96): Feature {
@@ -60,14 +66,14 @@ export function visibleRadii(distanceM: number): number[] {
   return radii.length > 0 ? radii : [RING_RADII_M[0]];
 }
 
-function ringCollection(center: LatLng, distanceM: number): GeoJSON.FeatureCollection {
+function ringCollection(center: LatLng, distanceM: number): FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: visibleRadii(distanceM).map((r) => circlePolygon(center, r)),
   };
 }
 
-function lineCollection(actual: LatLng, guess: LatLng): GeoJSON.FeatureCollection {
+function lineCollection(actual: LatLng, guess: LatLng): FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: [

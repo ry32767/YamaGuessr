@@ -96,32 +96,68 @@
     </div>
 
     <div class="card">
-      <h2>素材</h2>
-      <div id="materials" class="tiny muted">読み込み中…</div>
-      <label for="gpx">GPX（ルート）</label>
-      <select id="gpx"></select>
-      <label>動画（複数選べます。無ければ3D専用の出題になります）</label>
-      <div class="checks" id="videos"></div>
-      <label>写真</label>
-      <div id="photos" class="tiny muted">—</div>
-      <label for="mountainId">山ID（英数字とハイフン。例: odaigahara-2026-06-11）</label>
-      <input type="text" id="mountainId" placeholder="odaigahara-2026-06-11">
-      <label for="mountainName">山名（画面に出る名前）</label>
-      <input type="text" id="mountainName" placeholder="大台ヶ原・日出ヶ岳">
-      <label for="offset">カメラとGPXの時計ずれ補正 [秒]（分からなければ0）</label>
-      <input type="number" id="offset" value="0" step="1">
-      <label for="interval">動画から何秒おきに画像を切り出すか</label>
-      <input type="number" id="interval" value="2" step="0.5" min="0.5">
+      <h2>はじめての人へ</h2>
+      <p class="tiny">
+        ここでやることは<b>「1本の山行（GPX）を、1つのコースにする」</b>ことだけです。
+        GPXの形と国土地理院の地形データから<b>出題地点</b>を自動で選び、
+        （動画・写真があれば）その地点で見た画像を人が割り当てて、
+        <code>public/data/quiz_points.json</code> に書き出します。
+      </p>
+      <p class="tiny" style="margin-top:8px">
+        <b>3つの作り方があります。</b>下の「工程」の番号どおりに押していけば終わります。
+      </p>
+      <table class="tiny" style="margin-top:6px">
+        <tr><th>持っているもの</th><th>押す順番</th><th>できる出題</th></tr>
+        <tr><td>GPXだけ</td><td>1 → 4 → 6</td><td>3D地形だけを見て当てる（いちばん手軽）</td></tr>
+        <tr><td>GPX＋動画</td><td>1 → 2 → 3 → 5 → 6</td><td>上に加えて、動画のひとコマを見て当てる</td></tr>
+        <tr><td>GPX＋写真</td><td>1 → 2 → 3 → 5 → 6</td><td>上と同じ（写真も動画も「画像」として同じ扱い）</td></tr>
+      </table>
+      <p class="tiny muted" style="margin-top:8px">
+        3（レビュー）が本番です。<b>どの画像がどの地点で撮られたかは人にしか分かりません</b>
+        （GPXの時刻も写真の撮影時刻も位置の根拠には使いません）。
+        画像を割り当てない地点は、3D地形だけの出題になります。
+      </p>
     </div>
 
     <div class="card">
-      <h2>工程</h2>
+      <h2>1. 素材とコースの設定</h2>
+      <div id="materials" class="tiny muted">読み込み中…</div>
+      <label for="gpx">GPX（ルート）
+        <span class="tiny">— このコースの正体。地点の位置も地形図の朱線もここから作ります</span>
+      </label>
+      <select id="gpx"></select>
+      <label>動画（複数選べます。無ければ3D専用の出題になります）
+        <span class="tiny">— 山行が複数ファイルに分かれていれば全部選びます</span>
+      </label>
+      <div class="checks" id="videos"></div>
+      <label>写真 <span class="tiny">— Source/photos/ に入っているぶんが自動で使われます</span></label>
+      <div id="photos" class="tiny muted">—</div>
+      <label for="mountainId">山ID
+        <span class="tiny">— コースの識別子。<b>同じIDでもう一度作るとそのコースを作り直し</b>、
+          違うIDならコースが増えます。英数字とハイフンで「山名-日付」が分かりやすい</span>
+      </label>
+      <input type="text" id="mountainId" placeholder="odaigahara-2026-06-11">
+      <label for="mountainName">山名 <span class="tiny">— ホーム画面に出る表示名（日本語でOK）</span></label>
+      <input type="text" id="mountainName" placeholder="大台ヶ原・日出ヶ岳">
+      <label for="offset">カメラとGPXの時計ずれ補正 [秒]
+        <span class="tiny">— 参考工程（7・8）でしか使いません。分からなければ0のまま</span>
+      </label>
+      <input type="number" id="offset" value="0" step="1">
+      <label for="interval">動画から何秒おきに画像を切り出すか
+        <span class="tiny">（タイムラプスは動画自体が短いので 0.2〜0.5 秒に。20秒の動画を2秒おきだと10枚しか出ません）</span>
+      </label>
+      <input type="number" id="interval" value="2" step="0.1" min="0.1">
+    </div>
+
+    <div class="card">
+      <h2>2. 工程（上から順に押す）</h2>
       <div class="steps" id="steps"></div>
       <p class="tiny muted" style="margin-top:12px">
-        <b>基本の流れ：</b>1（地点）→ 2（画像）→ 3（レビューで割り当て）→ 5 → 6<br>
-        画像を使わず3D地形だけで出題するなら 1 → 4 → 6 だけで作れます。<br>
-        <b>GPXの時刻は使いません。</b>計画のGPXだと実際の時刻と合わないため、
-        どの画像をどの地点に使うかはレビューで人が決めます。
+        <b>この画面だけで完結します。</b>レビューの「studioに保存」で
+        <code>pipeline/data/confirmed_points.json</code> が直接書かれるので、
+        ダウンロードしたファイルを置き直す作業は要りません。<br>
+        押せないボタンには理由（足りていない前提）が出ます。実行中の出力は右のログに流れ、
+        最後の行が「完了」なら成功です。
       </p>
     </div>
 
@@ -142,16 +178,74 @@
 <script>
 'use strict';
 
+/**
+ * 画面から実行できる工程。
+ * `needs` は前提（満たしていなければボタンを押せないようにして理由を出す）、
+ * `makes` は成果物（次の工程が何を使うのかが分かるように）。
+ */
 const STEPS = [
-  { key: 'detect', name: '出題地点を探す', desc: 'GPXの形と地形から、出題に向いた地点を自動で拾う' },
-  { key: 'library', name: '画像ライブラリを作る', desc: '動画を一定間隔で切り出し、写真とあわせて一覧にする' },
-  { key: 'review', name: 'レビュー（別画面）', desc: '地点を選び、その地点で撮った画像を割り当てる。ここが本番' },
-  { key: 'adopt_all', name: '候補を全採用', desc: '画像を割り当てず、3D専用の地点として一気に確定させる近道' },
-  { key: 'frames', name: '出題用画像の書き出し', desc: '割り当てた画像を原本から作り直す（長辺1280px・メタデータ除去）' },
-  { key: 'build', name: '出題データ生成', desc: 'public/data/quiz_points.json とトラックを書き出す' },
-  { key: 'telemetry', name: '（参考）テレメトリ抽出', desc: '動画のGPS・姿勢を見る。位置決めには使わない' },
-  { key: 'match', name: '（参考）GPX照合', desc: 'カメラのGPSが生きている動画でのみ有効' },
+  {
+    key: 'detect', name: '出題地点を探す',
+    desc: 'GPXの形と国土地理院の地形から、出題に向いた地点（ピーク・コル・尾根・屈曲）を自動で拾う',
+    needs: ['gpx'], makes: '候補（candidates.json）',
+  },
+  {
+    key: 'library', name: '画像ライブラリを作る',
+    desc: '動画を一定間隔で切り出し、Source/photos/ の写真とあわせて「選ぶための一覧」にする',
+    needs: ['media'], makes: '画像ライブラリ（library/）',
+  },
+  {
+    key: 'review', name: 'レビューで画像を割り当てる（別タブ・ここが本番）',
+    desc: '地図の候補を選び→右の一覧から「その地点で撮った画像」をクリック。最後に「studioに保存」',
+    needs: ['candidates'], makes: '確定データ（confirmed_points.json）',
+  },
+  {
+    key: 'adopt_all', name: '候補を全採用（レビューを省く近道）',
+    desc: '画像を割り当てず、候補をまとめて3D専用の地点として確定させる。GPXだけで作るときはこれ',
+    needs: ['candidates', 'mountain'], makes: '確定データ（confirmed_points.json）',
+  },
+  {
+    key: 'frames', name: '出題用画像の書き出し',
+    desc: '割り当てた画像を原本から作り直す（長辺1280px・メタデータ除去）。画像を使わないなら飛ばす',
+    needs: ['confirmed'], makes: '出題用画像（frames/）',
+  },
+  {
+    key: 'build', name: '出題データ生成（仕上げ）',
+    desc: 'public/data/quiz_points.json とルート（トラック）を書き出す。ここまで来ればゲームに出る',
+    needs: ['confirmed', 'gpx', 'mountain'], makes: '公開データ（quiz_points.json）',
+  },
+  {
+    key: 'telemetry', name: '（参考）テレメトリ抽出',
+    desc: '動画のGPS・姿勢・タイムラプス倍率を見るだけ。位置決めには使わない',
+    needs: ['media'], makes: '中間ファイル（参考用）',
+  },
+  {
+    key: 'match', name: '（参考）GPX照合',
+    desc: 'カメラのGPSが生きている動画でのみ有効。既定の作り方では使わない',
+    needs: ['gpx', 'media'], makes: '中間ファイル（参考用）',
+  },
 ];
+
+/** 前提が満たされているか。満たされていなければ画面に出す理由を返す。 */
+function missingReason(step) {
+  const s = state;
+  if (!s) return '読み込み中';
+  const reasons = {
+    gpx: () => ($('gpx').value ? null : 'GPXを選んでください'),
+    media: () => (selectedVideos().length || s.photos.length
+      ? null : '動画を選ぶか、写真を追加してください'),
+    candidates: () => (s.intermediate.candidates ? null : '先に「出題地点を探す」を実行してください'),
+    confirmed: () => (s.intermediate.confirmed
+      ? null : '先にレビューで保存するか「候補を全採用」を実行してください'),
+    mountain: () => ($('mountainId').value.trim() && $('mountainName').value.trim()
+      ? null : '山IDと山名を入力してください'),
+  };
+  for (const need of step.needs || []) {
+    const reason = reasons[need] && reasons[need]();
+    if (reason) return reason;
+  }
+  return null;
+}
 
 const $ = (id) => document.getElementById(id);
 let state = null;
@@ -206,12 +300,24 @@ function renderSteps() {
   STEPS.forEach((step, index) => {
     const row = document.createElement('div');
     row.className = 'step';
+    const reason = missingReason(step);
+    const note = reason
+      ? `<span class="desc ng">${reason}</span>`
+      : `<span class="desc">できるもの: ${step.makes}</span>`;
     row.innerHTML = `<span class="n">${index + 1}</span>
-      <span><b>${step.name}</b><span class="desc">${step.desc}</span></span>`;
+      <span><b>${step.name}</b><span class="desc">${step.desc}</span>${note}</span>`;
     const button = document.createElement('button');
+    if (reason) button.disabled = true;
     if (step.key === 'review') {
       button.textContent = '開く';
-      button.onclick = () => window.open('/pipeline/review.html', '_blank');
+      // 山ID・山名は入力し直さなくていいように引き継ぐ（保存先はstudioが決める）
+      button.onclick = () => {
+        const query = new URLSearchParams({
+          mountain_id: $('mountainId').value,
+          mountain_name: $('mountainName').value,
+        });
+        window.open(`/pipeline/review.html?${query}`, '_blank');
+      };
     } else {
       button.textContent = '実行';
       if (step.key === 'build') button.className = 'primary';
@@ -278,7 +384,15 @@ async function loadState() {
   document.querySelectorAll('#videos input').forEach((i) => {
     if (keepVideos.has(i.value)) i.checked = true;
   });
+  // 前提（素材の選択・中間データ）が変われば、押せる工程も変わる
+  renderSteps();
 }
+
+// 入力を変えたらすぐ工程の可否に反映する（なぜ押せないのかを常に見せるため）
+for (const id of ['gpx', 'mountainId', 'mountainName']) {
+  $(id).addEventListener('input', renderSteps);
+}
+$('videos').addEventListener('change', renderSteps);
 
 // --- アップロード -----------------------------------------------------------
 async function upload(kind, files) {

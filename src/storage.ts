@@ -20,8 +20,18 @@ export interface Progress {
   datasetVersion: string;
   /** 出題順（point id） */
   order: string[];
-  /** 回答済みの結果 */
-  answers: { pointId: string; points: number; distanceM: number }[];
+  /** 回答済みの結果（時間の倍率まで含んだもの） */
+  answers: {
+    pointId: string;
+    points: number;
+    distanceM: number;
+    basePoints: number;
+    elapsedS: number;
+    walkDistanceM: number;
+    walkSecondsS: number;
+    totalTimeS: number;
+    timeFactor: number;
+  }[];
 }
 
 function read<T>(key: string, fallback: T): T {

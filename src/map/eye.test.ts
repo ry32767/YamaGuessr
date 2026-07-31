@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   EYE_HEIGHT_M,
-  MAX_AIM_DOWN_DEG,
-  MAX_RANGE_M,
+  MAX_AIM_M,
+  MAX_DOWN_DEG,
+  MIN_AIM_M,
   MIN_DOWN_DEG,
-  aimAtTerrain,
+  NEAR_PLANE_RATIO,
+  aimDistanceM,
+  aimTarget,
   destination,
+  nearestGroundDepthM,
 } from './eye';
 import { distanceMeters, type LatLng } from '../scoring';
 
@@ -17,10 +21,24 @@ function terrain(profile: (distanceM: number) => number): (p: LatLng) => number 
   return (p) => profile(distanceMeters(EYE, p));
 }
 
-/** 目から見た狙い先の見下ろし角 [deg]。 */
-function downOf(eyeAltitude: number, targetAltitude: number, horizontalM: number): number {
-  return toDeg(Math.atan2(eyeAltitude - targetAltitude, horizontalM));
+/**
+ * 目から狙い先を見たときの実際の見下ろし角 [deg]（正が下向き）。
+ *
+ * 距離は `distanceMeters`（大円距離）で測る。実装は局所平面で座標を作るので、
+ * 両者には0.1%ほどの差があり、角度に直すと最大0.05度ずれる。比較はその精度で行う。
+ */
+function downOfAim(eyeAltitudeM: number, aim: { target: LatLng; altitudeM: number }): number {
+  return toDeg(Math.atan2(eyeAltitudeM - aim.altitudeM, distanceMeters(EYE, aim.target)));
 }
+
+const TERRAINS: { name: string; profile: (d: number) => number }[] = [
+  { name: '平ら', profile: () => 0 },
+  { name: 'ゆるい下り', profile: (d) => -0.08 * d },
+  { name: '急な下り', profile: (d) => -0.4 * d },
+  { name: '上り', profile: (d) => 0.3 * d },
+  { name: '崖の縁', profile: (d) => (d < 2 ? 0 : -300) },
+  { name: '谷を挟む尾根', profile: (d) => (d < 30 ? 0 : d < 400 ? -200 : -150) },
+];
 
 describe('destination', () => {
   it('方位と距離ぶん離れた座標を返す', () => {
@@ -36,143 +54,116 @@ describe('destination', () => {
   });
 });
 
-describe('aimAtTerrain', () => {
-  it('平らな地形では、下限の見下ろし角で目線の高さぶん先の地面を狙う', () => {
-    const aim = aimAtTerrain({
-      eye: EYE,
-      eyeAltitudeM: EYE_HEIGHT_M,
-      bearingDeg: 0,
-      downDeg: MIN_DOWN_DEG,
-      elevationAt: terrain(() => 0),
-    });
-    // 1.5m の高さから 5.5度 見下ろすと、約 15.6m 先の地面に当たる
-    const expected = EYE_HEIGHT_M / Math.tan((MIN_DOWN_DEG * Math.PI) / 180);
-    expect(distanceMeters(EYE, aim.target)).toBeCloseTo(expected, 0);
-    expect(aim.targetAltitudeM).toBe(0);
-    expect(aim.downDeg).toBeCloseTo(MIN_DOWN_DEG, 1);
-  });
-
-  it('もっと下を向くと狙い先が近くなる', () => {
-    const flat = terrain(() => 0);
-    const near = aimAtTerrain({
-      eye: EYE,
-      eyeAltitudeM: EYE_HEIGHT_M,
-      bearingDeg: 0,
-      downDeg: 20,
-      elevationAt: flat,
-    });
-    expect(near.downDeg).toBeCloseTo(20, 1);
-    expect(distanceMeters(EYE, near.target)).toBeLessThan(5);
-  });
-
-  it('上り斜面ではすぐ手前の地面に当たる', () => {
-    // 45度で立ち上がる斜面
-    const aim = aimAtTerrain({
-      eye: EYE,
-      eyeAltitudeM: EYE_HEIGHT_M,
-      bearingDeg: 90,
-      downDeg: MIN_DOWN_DEG,
-      elevationAt: terrain((d) => d),
-    });
-    expect(distanceMeters(EYE, aim.target)).toBeLessThan(3);
-  });
-
-  it('下り斜面では遠くの地面に当たる', () => {
-    const aim = aimAtTerrain({
-      eye: EYE,
-      eyeAltitudeM: EYE_HEIGHT_M,
-      bearingDeg: 180,
-      downDeg: MIN_DOWN_DEG,
-      elevationAt: terrain((d) => -0.1 * d),
-    });
-    const horizontal = distanceMeters(EYE, aim.target);
-    expect(horizontal).toBeGreaterThan(100);
-    expect(horizontal).toBeLessThanOrEqual(MAX_RANGE_M);
-    // 地面より下を狙わない（狙い先の標高は地形の標高そのもの）
-    expect(aim.targetAltitudeM).toBeCloseTo(-0.1 * horizontal, 1);
-  });
-
-  it('見下ろし角は必ず下限以上になる（pitchが85度を超えないため）', () => {
-    // ほぼ平ら＝水平線が遠い地形。水平に近い視線を要求しても下限までは下がる
-    for (const bearing of [0, 45, 90, 135, 180, 225, 270, 315]) {
-      const aim = aimAtTerrain({
-        eye: EYE,
-        eyeAltitudeM: EYE_HEIGHT_M,
-        bearingDeg: bearing,
-        downDeg: 0,
-        elevationAt: terrain(() => 0),
-      });
-      expect(aim.downDeg).toBeGreaterThanOrEqual(MIN_DOWN_DEG - 0.01);
-      expect(90 - aim.downDeg).toBeLessThanOrEqual(85);
+describe('aimTarget（一人称カメラの狙い先）', () => {
+  /**
+   * いちばん大事な性質。**地形が何であれ、見下ろし角は操作した角度そのもの。**
+   * ここが崩れると、首を横に振っただけで視線が上下し「頭ごと動いた」ように見える。
+   */
+  it('どんな地形でも見下ろし角は操作した角度のまま', () => {
+    for (const { name, profile } of TERRAINS) {
+      for (const downDeg of [-30, -10, 0, 8, 25]) {
+        const options = {
+          eye: EYE,
+          eyeAltitudeM: EYE_HEIGHT_M,
+          bearingDeg: 0,
+          downDeg,
+          elevationAt: terrain(profile),
+        };
+        expect(downOfAim(options.eyeAltitudeM, aimTarget(options)), `${name} / ${downDeg}度`)
+          .toBeCloseTo(downDeg, 1);
+      }
     }
   });
 
-  it('崖の縁でも見下ろし角は変わらず、手前の地面を狙う', () => {
-    // 50m 先から400m落ちる地形。手前の平地に当たるので、角度はそのまま
-    const aim = aimAtTerrain({
-      eye: EYE,
-      eyeAltitudeM: EYE_HEIGHT_M,
-      bearingDeg: 0,
-      downDeg: MIN_DOWN_DEG,
-      elevationAt: terrain((d) => (d < 50 ? 0 : -400)),
-    });
-    expect(aim.downDeg).toBeCloseTo(MIN_DOWN_DEG, 1);
-    expect(distanceMeters(EYE, aim.target)).toBeLessThan(50);
-    expect(aim.targetAltitudeM).toBe(0);
-  });
-
-  it('地形が違っても、視線が地面に当たる限り見下ろし角は操作した角度のまま', () => {
-    // 首を横に振っただけで視線が上下すると、頭ごと動いたように見える
-    for (const slope of [0, -0.02, 0.5]) {
-      const aim = aimAtTerrain({
-        eye: EYE,
-        eyeAltitudeM: EYE_HEIGHT_M,
-        bearingDeg: 0,
-        downDeg: 8,
-        elevationAt: terrain((d) => slope * d),
-      });
-      expect(aim.downDeg).toBeCloseTo(8, 1);
-    }
-  });
-
-  it('どんな地形でも俯瞰にならない（見下ろし角に上限がある）', () => {
-    // 目の前から垂直に落ちる地形。素直に地形へ視線を当てると真下を向いてしまう
-    const cliff = aimAtTerrain({
-      eye: EYE,
-      eyeAltitudeM: EYE_HEIGHT_M,
-      bearingDeg: 0,
-      downDeg: MIN_DOWN_DEG,
-      elevationAt: terrain((d) => -1000 * d),
-    });
-    expect(cliff.downDeg).toBeLessThanOrEqual(MAX_AIM_DOWN_DEG + 1);
-    // 標高が全く取れない（＝0が返り続ける）地形でも一人称のまま
-    const unknown = aimAtTerrain({
+  it('見上げると狙い先が目より高くなる（v5でpitch>90が使えるため）', () => {
+    const options = {
       eye: EYE,
       eyeAltitudeM: 1000,
       bearingDeg: 0,
-      downDeg: MIN_DOWN_DEG,
-      elevationAt: () => 0,
-    });
-    expect(unknown.downDeg).toBeLessThanOrEqual(MAX_AIM_DOWN_DEG + 1);
-    expect(unknown.downDeg).toBeGreaterThanOrEqual(MIN_DOWN_DEG - 0.01);
+      downDeg: -25,
+      elevationAt: terrain(() => 900),
+    };
+    const aim = aimTarget(options);
+    expect(aim.altitudeM).toBeGreaterThan(options.eyeAltitudeM);
+    // 見上げた先に地面は要らない（空中の一点を中心にできる）
+    expect(aim.altitudeM).toBeGreaterThan(terrain(() => 900)(aim.target));
   });
 
-  it('狙い先の標高と距離が整合している', () => {
-    const aim = aimAtTerrain({
+  it('可動範囲の外を指定しても丸められる', () => {
+    const base = { eye: EYE, eyeAltitudeM: EYE_HEIGHT_M, bearingDeg: 0, elevationAt: terrain(() => 0) };
+    expect(downOfAim(EYE_HEIGHT_M, aimTarget({ ...base, downDeg: -90 }))).toBeCloseTo(
+      MIN_DOWN_DEG,
+      1,
+    );
+    expect(downOfAim(EYE_HEIGHT_M, aimTarget({ ...base, downDeg: 90 }))).toBeCloseTo(
+      MAX_DOWN_DEG,
+      1,
+    );
+  });
+
+  /**
+   * 近クリップ面（狙い先までの距離の1/75）は、いちばん近く写る地面より手前に
+   * 無ければならない。手前に無いと足元が切り取られ、その穴から地形の**裏側**が見える。
+   */
+  it('足元の地面が近クリップ面に切り取られない', () => {
+    for (const { name, profile } of TERRAINS) {
+      for (const downDeg of [-20, 0, 10, MAX_DOWN_DEG]) {
+        const options = {
+          eye: EYE,
+          eyeAltitudeM: EYE_HEIGHT_M,
+          bearingDeg: 0,
+          downDeg,
+          elevationAt: terrain(profile),
+        };
+        const nearPlaneM = aimTarget(options).distanceM * NEAR_PLANE_RATIO;
+        expect(nearPlaneM, `${name} / ${downDeg}度`).toBeLessThan(nearestGroundDepthM(options));
+      }
+    }
+  });
+
+  it('狙い先までの距離は決めた範囲に収まる', () => {
+    for (const { profile } of TERRAINS) {
+      for (const downDeg of [-30, 0, 30]) {
+        const distance = aimDistanceM({
+          eye: EYE,
+          eyeAltitudeM: EYE_HEIGHT_M,
+          bearingDeg: 0,
+          downDeg,
+          elevationAt: terrain(profile),
+        });
+        expect(distance).toBeGreaterThanOrEqual(MIN_AIM_M);
+        expect(distance).toBeLessThanOrEqual(MAX_AIM_M);
+      }
+    }
+  });
+
+  it('下を向くほど狙い先を近くに詰める（足元が近くなるため）', () => {
+    const base = {
+      eye: EYE,
+      eyeAltitudeM: EYE_HEIGHT_M,
+      bearingDeg: 0,
+      elevationAt: terrain(() => 0),
+    };
+    expect(aimDistanceM({ ...base, downDeg: 30 })).toBeLessThan(
+      aimDistanceM({ ...base, downDeg: 0 }),
+    );
+    // 見上げているときは足元に地面が写らないので、いちばん遠くまで狙える
+    expect(aimDistanceM({ ...base, downDeg: -20 })).toBe(MAX_AIM_M);
+  });
+
+  it('狙い先の座標・標高・距離が整合している', () => {
+    const options = {
       eye: EYE,
       eyeAltitudeM: 1000 + EYE_HEIGHT_M,
       bearingDeg: 30,
       downDeg: 8,
       elevationAt: terrain((d) => 1000 - 0.05 * d),
-    });
+    };
+    const aim = aimTarget(options);
     const horizontal = distanceMeters(EYE, aim.target);
     expect(aim.distanceM).toBeCloseTo(
-      Math.hypot(horizontal, 1000 + EYE_HEIGHT_M - aim.targetAltitudeM),
+      Math.hypot(horizontal, options.eyeAltitudeM - aim.altitudeM),
       0,
-    );
-    expect(aim.downDeg).toBeCloseTo(
-      downOf(1000 + EYE_HEIGHT_M, aim.targetAltitudeM, horizontal),
-      1,
     );
   });
 });

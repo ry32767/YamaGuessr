@@ -245,43 +245,136 @@
 }
 
 /* --- 出題画面 --------------------------------------------------------------
-   狭幅：画像を上、地図を下（親指が届く側に地図）。
-   広幅：画像を左、地図を右。どちらでも地図が最大面積を占める。 */
+   「見る（3D・写真）」と「答える（地形図）」を**1画面ずつ**に分ける。
+   どちらも読む対象なので、半分ずつに割るとどちらも読めない。上のタブで切り替え、
+   選ばれた側が画面をいっぱいに使う。PC・スマホで同じ操作にしてある。 */
 .quiz {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(30vh, 38vh) 1fr;
-}
-
-@media (min-width: 60rem) {
-  .quiz {
-    grid-template-rows: 1fr;
-    grid-template-columns: minmax(20rem, 38%) 1fr;
-  }
-}
-
-.quiz__media {
-  position: relative;
-  min-height: 0;
-  background: var(--c-ridge);
-  border-bottom: var(--border);
   display: flex;
   flex-direction: column;
 }
 
-@media (min-width: 60rem) {
-  .quiz__media {
-    border-bottom: none;
-    border-right: var(--border);
-  }
+.quiz__tabs {
+  display: flex;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  background: var(--c-dusk);
+  border-bottom: var(--border);
+  flex-shrink: 0;
 }
 
-.quiz__photobox {
+.quiz__tab {
+  flex: 1;
+  min-height: var(--tap);
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-slate);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.quiz__tab:hover {
+  color: var(--c-snow);
+}
+
+/* 選択中は色だけでなく、下線と太字でも示す（色だけで状態を表さない） */
+.quiz__tab[aria-selected='true'] {
+  background: var(--c-mist);
+  border-color: var(--c-mist);
+  color: var(--c-snow);
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--c-alt);
+}
+
+/* 持ち時間。**タブの下＝どちらの面でも常に見える位置**に置く。
+   バーの残りと点数の倍率が一致しているので、見たまま判断できる（DESIGN.md） */
+.quiz__timer {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  background: var(--c-dusk);
+  border-bottom: var(--border);
+  font-size: var(--fs-xs);
+  color: var(--c-slate);
+  flex-shrink: 0;
+}
+
+.quiz__timer b {
+  font-family: var(--font-num);
+  font-size: var(--fs-sm);
+  color: var(--c-snow);
+  min-width: 3.5em;
+}
+
+.quiz__timerbar {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--c-mist);
+  overflow: hidden;
+}
+
+.quiz__timerbar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--c-alt);
+  transition: width 0.25s linear;
+}
+
+.quiz__timerrate {
+  min-width: 3.5em;
+  text-align: right;
+}
+
+/* 残りが少ない／尽きたことは、色だけでなく数字と「時間切れ」の文字でも示す */
+.quiz__timer--low .quiz__timerbar i,
+.quiz__timer--out .quiz__timerbar i {
+  background: var(--c-far);
+}
+
+.quiz__timer--out b {
+  color: var(--c-far);
+}
+
+.quiz__pane {
   flex: 1;
   min-height: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
+  background: var(--c-ridge);
+}
+
+.quiz__pane[hidden] {
+  display: none;
+}
+
+/* 見る側の主アクション。3Dの操作ボタンと重ならないよう、浮かせずに帯で置く */
+.quiz__viewfoot {
+  flex-shrink: 0;
+  padding: var(--s-2) var(--s-3) calc(var(--s-2) + var(--safe-b));
+  border-top: var(--border);
+  background: var(--c-dusk);
+}
+
+.quiz__viewfoot .btn {
+  max-width: 26rem;
+  margin: 0 auto;
+}
+
+/* 写真は上に控えめに置き、3Dに面積を渡す（写真だけの地点は無い） */
+.quiz__photobox {
+  flex: 0 1 38%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: var(--border);
 }
 
 .quiz__photo {
@@ -362,6 +455,12 @@
 /* 出発地点から歩いた距離。回答の正解は出発地点なので、離れたことが分かるように */
 .terrain-hud__moved {
   color: var(--c-alt);
+}
+
+/* 歩いたぶんの支払い（推定時間と減点）。払う前に見えている必要がある */
+.terrain-hud__cost {
+  color: var(--c-far);
+  font-weight: 700;
 }
 
 .terrain-hud__note {
@@ -473,11 +572,6 @@
   }
 }
 
-.quiz__answer {
-  position: relative;
-  min-height: 0;
-}
-
 .map {
   position: absolute;
   inset: 0;
@@ -569,6 +663,11 @@
 .result__facts b {
   color: var(--c-snow);
   font-family: var(--font-num);
+}
+
+/* 移動の減点。引かれたことが分かるよう、良し悪しの色（遠い側）で示す */
+.result__cost b {
+  color: var(--c-far);
 }
 
 /* --- セッション結果 --------------------------------------------------------- */
