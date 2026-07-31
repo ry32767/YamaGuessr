@@ -87,6 +87,13 @@
   }
 
   .empty { color: var(--muted); line-height: 1.7; }
+  /* 手順は地点を選んでも消えないように、詳細の上に固定で置く */
+  .steps {
+    margin: 0 0 12px; padding: 10px 10px 10px 28px; line-height: 1.7;
+    background: #10151c; border: 1px solid var(--line); border-radius: 8px;
+  }
+  .steps li { margin: 2px 0; }
+  .steps b { color: var(--text); }
   .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
   .kv { display: grid; grid-template-columns: 7rem 1fr; gap: 2px 8px; margin: 8px 0; }
   .kv dt { color: var(--muted); }
@@ -149,16 +156,22 @@
     <div class="legend" id="legend"></div>
   </div>
   <aside id="panel">
+    <!-- 手順は**常に見えている**ようにする（地点を選ぶと下の説明は詳細に差し替わるため） -->
+    <ol class="steps">
+      <li><b>地図のピンをクリック</b>して地点を選ぶ</li>
+      <li>下の<b>画像ライブラリ</b>から、その地点で撮った画像をクリック（何枚でも）</li>
+      <li>ぜんぶ終わったら右上の<b>「studioに保存」</b></li>
+    </ol>
     <p class="empty" id="empty">
-      <b>使い方</b><br>
-      1. studio（<code>python pipeline/studio.py</code>）の「レビュー」から開く<br>
-      2. <code>pipeline/data/</code> の candidates.json と library/index.json を自動で読み込む<br>
-      3. 地図のピンをクリックして地点を選ぶ<br>
-      4. 右の一覧から、<b>その地点で撮った画像</b>をクリックして割り当てる（複数可）<br>
-      5. いらない候補は <b>R</b> で却下。地図の空白を <b>Shift+クリック</b> で地点を手動追加<br>
-      6. 「studioに保存」を押すと <code>pipeline/data/confirmed_points.json</code> に直接書かれる。
-         studioに戻って次の工程へ進めます<br><br>
-      画像が無いままの地点は、3D地形だけで出題する地点になります。
+      <b>この画面ですること</b><br>
+      自動で拾った出題地点に、<b>「その地点で撮った画像」を人の目で割り当てる</b>のが仕事です。
+      どの画像がどこで撮られたかは機械には分からないので、ここだけは人が決めます。<br><br>
+      <b>覚えておくと早い操作</b><br>
+      ・<b>A</b> で採用 / <b>R</b> で却下（地点を選んだ状態で）<br>
+      ・地図の空白を <b>Shift+クリック</b> すると地点を手動で足せる<br>
+      ・画像を1枚も割り当てなくてよい（その地点は<b>3D地形だけの出題</b>になる）<br>
+      ・動画も写真も無いコースなら、この画面は飛ばして studio の
+        <b>「候補を全採用」</b>で構いません
     </p>
     <div id="detail" hidden></div>
   </aside>
@@ -294,6 +307,11 @@ function fitToCandidates() {
 async function autoLoad() {
   const candidates = await tryFetchJson(DATA_BASE + 'candidates.json');
   if (candidates) adoptCandidates(candidates);
+  else {
+    // 地図に何も出ない理由を黙らせない（studio の工程名でそのまま案内する）
+    document.getElementById('counts').innerHTML =
+      '<span class="ng">候補がありません</span>：studio の「1. 出題地点を探す」を先に実行してください';
+  }
   const library = await tryFetchJson(LIBRARY_BASE + 'index.json');
   if (library) state.library = library.images || [];
   updateCounts();
@@ -435,7 +453,9 @@ function renderLibrary() {
   if (!state.library.length) {
     grid.innerHTML = '';
     info.innerHTML =
-      '画像がありません。<code>build_library.py</code> で動画・写真から一覧を作ってください。';
+      '画像がありません。studio の <b>「2. 画像ライブラリを作る」</b>を実行してください' +
+      '（動画も写真も無いコースなら、この画面は使わず studio の' +
+      '<b>「4. 候補を全採用」</b>で確定できます）。';
     return;
   }
   const list = filteredLibrary();
