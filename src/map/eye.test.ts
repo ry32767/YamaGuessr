@@ -107,9 +107,8 @@ describe('aimAtTerrain', () => {
     }
   });
 
-  it('崖の縁では地形の際まで視線が下がり、手前の地面を狙う', () => {
-    // 50m 先から400m落ちる地形。水平に近い視線ではどこにも当たらないので、
-    // 際（遠くの谷底を掠める角度）まで下げる。その結果、手前の平地に当たる
+  it('崖の縁でも見下ろし角は変わらず、手前の地面を狙う', () => {
+    // 50m 先から400m落ちる地形。手前の平地に当たるので、角度はそのまま
     const aim = aimAtTerrain({
       eye: EYE,
       eyeAltitudeM: EYE_HEIGHT_M,
@@ -117,9 +116,23 @@ describe('aimAtTerrain', () => {
       downDeg: MIN_DOWN_DEG,
       elevationAt: terrain((d) => (d < 50 ? 0 : -400)),
     });
-    expect(aim.downDeg).toBeGreaterThan(MIN_DOWN_DEG);
+    expect(aim.downDeg).toBeCloseTo(MIN_DOWN_DEG, 1);
     expect(distanceMeters(EYE, aim.target)).toBeLessThan(50);
     expect(aim.targetAltitudeM).toBe(0);
+  });
+
+  it('地形が違っても、視線が地面に当たる限り見下ろし角は操作した角度のまま', () => {
+    // 首を横に振っただけで視線が上下すると、頭ごと動いたように見える
+    for (const slope of [0, -0.02, 0.5]) {
+      const aim = aimAtTerrain({
+        eye: EYE,
+        eyeAltitudeM: EYE_HEIGHT_M,
+        bearingDeg: 0,
+        downDeg: 8,
+        elevationAt: terrain((d) => slope * d),
+      });
+      expect(aim.downDeg).toBeCloseTo(8, 1);
+    }
   });
 
   it('どんな地形でも俯瞰にならない（見下ろし角に上限がある）', () => {

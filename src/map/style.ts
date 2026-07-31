@@ -62,6 +62,15 @@ export const TERRAIN_EXAGGERATION = 1.2;
 export const TERRAIN_SOURCE = 'dem';
 
 /**
+ * 標高を問い合わせるときのズーム。
+ *
+ * 表示ズームで読むと同じ場所でも値がわずかに（数十cm）変わり、視線を振るだけで
+ * 頭が上下してしまうので、常にこの値で読む。標高タイルの最大ズーム+1にしてあるのは、
+ * MapLibreが描画に使うズーム（3Dビューでは15以上になる）と読みを揃えるため。
+ */
+export const TERRAIN_QUERY_ZOOM = DEM_MAX_ZOOM + 1;
+
+/**
  * モード②の3D地形スタイル。
  *
  * **テクスチャは空中写真。地形図タイルは貼らない。** 地形図には山名・三角点・注記が

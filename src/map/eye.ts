@@ -39,8 +39,10 @@ export const MAX_AIM_DOWN_DEG = 45;
 /**
  * 視線を追う最遠距離 [m]。
  *
- * 狙い先が遠いほど地図のズームは下がる。ここを大きく取りすぎるとズームが14を切り、
- * 標高タイルが1段粗いものに替わって近くの地形が鈍る。z14が使われる範囲に収めてある。
+ * 狙い先が遠いほど地図のズームは下がり、近くの地形とテクスチャが粗くなる
+ * （MapLibreはズームから描くタイルの細かさを決めるため）。**ズーム14を切ると
+ * 標高タイルが1段粗いものに替わり、MapLibre側の「カメラが地形に潜ったか」の判定と
+ * こちらの標高の読みがずれて、視点を書き換えられる。** その手前で止める。
  */
 export const MAX_RANGE_M = 1200;
 
@@ -68,6 +70,26 @@ export interface AimOptions {
   downDeg: number;
   /** 座標の標高 [m]（地形の誇張後の値）を返す */
   elevationAt: (p: LatLng) => number;
+}
+
+/**
+ * 視線が地面に届かない向きで、**いちばん水平に近く見られる**距離を選ぶ。
+ *
+ * MapLibreは「地面の1点」しか画面中心にできないので、谷を見渡す向きのように
+ * 視線の先に地面が無いときは、地形の際（掠める角度が最小の場所）を狙うしかない。
+ * ここで一番浅い角度を選んでおけば、操作した角度からのずれが最小になる。
+ */
+function flattestDistance(distances: number[], grazes: number[]): number {
+  let best = distances[distances.length - 1] as number;
+  let smallest = Infinity;
+  for (let i = 0; i < distances.length; i += 1) {
+    const g = grazes[i] ?? Infinity;
+    if (g < smallest) {
+      smallest = g;
+      best = distances[i] as number;
+    }
+  }
+  return best;
 }
 
 /** ある方位・距離の座標。 */
@@ -98,12 +120,9 @@ export function aimAtTerrain(options: AimOptions): Aim {
   const grazing = (t: number): number => toDeg(Math.atan2(eyeAltitudeM - at(t), t));
 
   const grazes = distances.map(grazing);
-  // 地形の際。これより上に視線を向けても地面には当たらない
-  const horizon = Math.min(...grazes);
-  const downDeg = Math.min(
-    MAX_AIM_DOWN_DEG,
-    Math.max(options.downDeg, MIN_DOWN_DEG, horizon + 0.2),
-  );
+  // **見下ろし角は操作した角度そのまま。地形で勝手に変えない。**
+  // 変えると、首を横に振っただけで視線が上下し「頭ごと動いた」ように見える。
+  const downDeg = Math.min(MAX_AIM_DOWN_DEG, Math.max(options.downDeg, MIN_DOWN_DEG));
 
   const tan = Math.tan(toRad(downDeg));
   /** 視線が地面より上なら正 */
@@ -123,7 +142,6 @@ export function aimAtTerrain(options: AimOptions): Aim {
   // 目の前が壁（最初のサンプルから地面の中）のときは、手前の交差を使う
   if (index < 0) index = grazes.findIndex((g) => g <= downDeg);
 
-  let hit = MAX_RANGE_M;
   if (index >= 0) {
     let above = index > 0 ? (distances[index - 1] as number) : MIN_RANGE_M;
     let below = distances[index] as number;
@@ -133,28 +151,50 @@ export function aimAtTerrain(options: AimOptions): Aim {
       if (gap(mid) > 0) above = mid;
       else below = mid;
     }
-    hit = (above + below) / 2;
+    const hit = (above + below) / 2;
+    const found = aimAt(eye, bearingDeg, hit, eyeAltitudeM, elevationAt);
+    if (found.downDeg <= MAX_AIM_DOWN_DEG + 1) return found;
   }
 
-  let target = destination(eye, bearingDeg, hit);
-  let targetAltitudeM = elevationAt(target);
-  let actual = toDeg(Math.atan2(eyeAltitudeM - targetAltitudeM, hit));
+  // 視線の先に地面が無い（谷や海を見渡している）向き。
+  // **一番浅く見られる場所**を狙う。狙い先の標高は実際の地形の値なので頭の位置は正しく、
+  // 操作した角度からのずれも最小になる（これ以上水平に近づけるとどこにも当たらない）。
+  const flattest = aimAt(
+    eye,
+    bearingDeg,
+    flattestDistance(distances, grazes),
+    eyeAltitudeM,
+    elevationAt,
+  );
+  if (flattest.downDeg <= MAX_AIM_DOWN_DEG + 1) return flattest;
 
-  // 交差が見つからない／下向きが限界を超えた場合は、平らな地形と見なして狙い先を作る。
-  // 標高タイルの読み込み途中でも一人称のままにするための逃げ道。
-  if (index < 0 || !Number.isFinite(actual) || actual > MAX_AIM_DOWN_DEG + 1) {
-    const groundAtEye = elevationAt(eye);
-    const drop = Math.max(0.5, eyeAltitudeM - groundAtEye);
-    hit = drop / Math.tan(toRad(downDeg));
-    target = destination(eye, bearingDeg, hit);
-    targetAltitudeM = groundAtEye;
-    actual = downDeg;
-  }
+  // 崖の縁など、どこを狙っても真下に近い場合だけ、平らな地形と見なして角度を守る。
+  // 頭の位置は多少ずれるが、俯瞰の画にはしない（DESIGN.md 不変条件2b）。
+  const groundAtEye = elevationAt(eye);
+  const drop = Math.max(0.5, eyeAltitudeM - groundAtEye);
+  const hit = drop / tan;
+  return {
+    target: destination(eye, bearingDeg, hit),
+    targetAltitudeM: groundAtEye,
+    distanceM: Math.hypot(hit, drop),
+    downDeg,
+  };
+}
 
+/** ある距離の地面を狙ったときの視点。 */
+function aimAt(
+  eye: LatLng,
+  bearingDeg: number,
+  distance: number,
+  eyeAltitudeM: number,
+  elevationAt: (p: LatLng) => number,
+): Aim {
+  const target = destination(eye, bearingDeg, distance);
+  const targetAltitudeM = elevationAt(target);
   return {
     target,
     targetAltitudeM,
-    distanceM: Math.hypot(hit, eyeAltitudeM - targetAltitudeM),
-    downDeg: actual,
+    distanceM: Math.hypot(distance, eyeAltitudeM - targetAltitudeM),
+    downDeg: toDeg(Math.atan2(eyeAltitudeM - targetAltitudeM, distance)),
   };
 }

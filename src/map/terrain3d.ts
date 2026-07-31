@@ -6,13 +6,14 @@
  * 見下ろし角には上限があり、**俯瞰（上空から見下ろす画）にはならない**。
  * 上から見せると「自分がどこに立っているか」が伝わらないため（DESIGN.md 不変条件2b）。
  *
- * ルートは全体を描く。ただし一人称なので、尾根の裏に回ったぶんは地形に隠れて見えない。
+ * ルートは全体を描き、出題地点にはピンを立てる。
+ * ただし一人称なので、尾根の裏に回ったぶんは地形に隠れて見えない。
  *
  * **地形図タイルを地形テクスチャに使わない。** 山名・三角点・注記が焼き込まれており、
- * 答えが画面に表示されてしまう（docs/spec.md 設計判断表）。描くのは陰影起伏だけ。
+ * 答えが画面に表示されてしまう（docs/spec.md 設計判断表）。貼るのは空中写真。
  */
 import maplibregl, { LngLat, Map as MapLibreMap, type CameraOptions } from 'maplibre-gl';
-import type { LatLng } from '../scoring';
+import { distanceMeters, type LatLng } from '../scoring';
 import type { TrackFeature } from '../types';
 import {
   EYE_HEIGHT_M,
@@ -24,6 +25,7 @@ import { RoutePath, angleDiffDeg } from './route';
 import {
   GSI_ATTRIBUTION,
   TERRAIN_EXAGGERATION,
+  TERRAIN_QUERY_ZOOM,
   TERRAIN_SOURCE,
   registerGsiDemProtocol,
   terrainStyle,
@@ -33,10 +35,14 @@ import {
 export const STEP_M = 25;
 /** Shiftを押しながら／長押しで歩く距離 [m] */
 export const LONG_STEP_M = 100;
+/** 歩く速さ。1mあたりの時間 [ms] と、その下限・上限 */
+const WALK_MS_PER_M = 9;
+const WALK_MIN_MS = 260;
+const WALK_MAX_MS = 900;
 /** タップした場所からこの距離までルートがあれば、そこへ移動する */
 const TAP_SNAP_M = 60;
-/** 出発地点の印を出し始める移動距離 [m]（足元にあるうちは出さない） */
-const START_MARKER_AFTER_M = 15;
+/** 出題地点のピンを出し始める距離 [m]（足元にあるうちは視界を塞ぐだけなので出さない） */
+const START_PIN_AFTER_M = 12;
 /**
  * 地形が落ち着くまで視点を解き直す回数。
  *
@@ -67,7 +73,7 @@ const LAYER_START_RING = 'yg-start-ring';
  * 目の前の斜面（数m先）を狙うとその面より内側になり、地形が1枚も描かれなくなる。
  * 上限に当たったときはカメラが視線の後ろへ十数m下がるが、位置の誤差は採点に響かない。
  */
-const MIN_ZOOM = 12;
+const MIN_ZOOM = 13;
 const MAX_ZOOM = 21;
 
 export interface Terrain3DOptions {
@@ -88,6 +94,11 @@ export interface WalkState {
   movedM: number;
   /** 歩けるか（ルートが登録されているか） */
   canWalk: boolean;
+}
+
+/** 歩き出しと止まりを柔らかくする（等速だと機械が動いたように見える）。 */
+function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }
 
 /** 方位を「北」「北東」…の日本語表記にする。数字だけに頼らないため。 */
@@ -113,6 +124,8 @@ export class Terrain3D {
   private groundElevationM: number;
   private ready = false;
   private frame: number | null = null;
+  /** 歩いている最中のアニメーション */
+  private walkFrame: number | null = null;
   /** 地形が変わるたびに解き直すが、揺れ続けないよう回数を絞る */
   private settleBudget = SETTLE_APPLIES;
   /** MapLibreに視点を書き換えられて解き直した回数（際限なく繰り返さないため） */
@@ -123,6 +136,7 @@ export class Terrain3D {
   private dragTravel = 0;
   private note: string | null = null;
   private noteTimer: number | null = null;
+  private startPin: maplibregl.Marker | null = null;
   private readonly hud: HTMLElement;
   private readonly onWalk: ((state: WalkState) => void) | undefined;
 
@@ -216,18 +230,24 @@ export class Terrain3D {
   /**
    * 地形の標高 [m]（誇張後）。
    *
-   * `queryTerrainElevation` が返すのは**中心からの相対値**なので、中心の標高を足して
-   * 絶対値にする。
+   * **必ず同じズーム（標高タイルの最大ズーム）で読む。** `map.queryTerrainElevation` は
+   * そのときの表示ズームで読むため、視線を振ってズームが変わると同じ場所の標高が
+   * 数十cm変わる。それをそのまま視点に反映すると、首を振るだけで頭が上下する。
    *
    * **標高タイルが未着の場所はちょうど0が返る**（MapLibreの仕様。地理院の欠測も0にしてある）。
-   * これをそのまま海面として扱うと「一面が海まで落ちている地形」を狙ってしまい、
-   * タイルが届くまで視点が空を向く。未着は「自分と同じ高さ」とみなして平坦に扱う。
+   * これをそのまま海面として扱うと「一面が海まで落ちている地形」を狙ってしまうので、
+   * 未着は「自分と同じ高さ」とみなして平坦に扱う。
    */
-  private elevationAt(p: LatLng): number {
-    const relative = this.map.queryTerrainElevation([p.lon, p.lat]);
-    if (relative === null || !Number.isFinite(relative)) return this.fallbackElevation();
-    const absolute = this.map.transform.elevation + relative;
-    return absolute === 0 ? this.fallbackElevation() : absolute;
+  private elevationAt(p: LatLng, zoom: number = TERRAIN_QUERY_ZOOM): number {
+    const terrain: MapLibreMap['terrain'] | undefined = this.map.terrain;
+    if (!terrain) return this.fallbackElevation();
+    const value = terrain.getElevationForLngLatZoom(new LngLat(p.lon, p.lat), zoom);
+    return value === 0 || !Number.isFinite(value) ? this.fallbackElevation() : value;
+  }
+
+  /** 立っている地面の標高 [m]（誇張後）。 */
+  private groundUnderEye(): number {
+    return this.elevationAt(this.eye());
   }
 
   private fallbackElevation(): number {
@@ -252,45 +272,51 @@ export class Terrain3D {
   /**
    * 目の位置にカメラを立てる。
    *
-   * 標高の参照はタイルのズームに依るので、カメラを動かすとその答えも変わる。
-   * 落ち着くまで数回解き直し、変わらなくなったら止める。
+   * **カメラの高さは「画面中央に据えた地面の標高 ＋ そこまでの水平距離×tan(見下ろし角)」**
+   * になる（MapLibreは地形を有効にすると中心を必ず地面に置くため）。だから狙い先は
+   * 視線が地面と交わる点でなければならず、それが取れて初めて目の高さに立てる。
    */
   private apply(): void {
     this.renderHud();
     if (!this.ready) return;
     const eye = this.eye();
     const eyeLngLat = new LngLat(eye.lon, eye.lat);
-    for (let i = 0; i < 3; i += 1) {
-      const eyeAltitudeM = this.elevationAt(eye) + EYE_HEIGHT_M * TERRAIN_EXAGGERATION;
-      const aim = aimAtTerrain({
-        eye,
-        eyeAltitudeM,
-        bearingDeg: this.bearing,
-        downDeg: this.downDeg,
-        elevationAt: (p) => this.elevationAt(p),
-      });
-      const options = this.map.calculateCameraOptionsFromTo(
+    const eyeAltitudeM = this.groundUnderEye() + EYE_HEIGHT_M * TERRAIN_EXAGGERATION;
+    const aim = aimAtTerrain({
+      eye,
+      eyeAltitudeM,
+      bearingDeg: this.bearing,
+      downDeg: this.downDeg,
+      elevationAt: (p) => this.elevationAt(p),
+    });
+    const targetLngLat = new LngLat(aim.target.lon, aim.target.lat);
+    const solve = (targetAltitudeM: number): CameraOptions => {
+      const camera = this.map.calculateCameraOptionsFromTo(
         eyeLngLat,
         eyeAltitudeM,
-        new LngLat(aim.target.lon, aim.target.lat),
-        aim.targetAltitudeM,
+        targetLngLat,
+        targetAltitudeM,
       );
       // MapLibre側でも丸められるが、丸めた値で比べないと同じ視点だと気づけない
-      options.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, options.zoom ?? MAX_ZOOM));
-      if (this.sameAsCurrent(options)) break;
-      const tileZoom = this.map.transform.tileZoom;
-      this.map.jumpTo(options);
-      // MapLibreには「カメラが地形に潜ったら持ち上げる」保護がある。中心の標高の更新が
-      // 1フレーム遅れるため、視線を大きく振ると誤検知して俯瞰に書き換えられることがある。
-      // 書き換えられたら次のフレームで解き直す（そのときは中心の標高が追いついている）。
-      if (Math.abs(this.map.getPitch() - (options.pitch ?? 0)) > 0.5 && this.rewrites < 4) {
-        this.rewrites += 1;
-        this.settleBudget = SETTLE_APPLIES;
-        this.schedule();
-        break;
-      }
-      // タイルのズームが変わらなければ標高の答えも変わらない。解き直しても同じ
-      if (this.map.transform.tileZoom === tileZoom) break;
+      camera.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camera.zoom ?? MAX_ZOOM));
+      return camera;
+    };
+    // 狙い先の標高は**MapLibreが描画に使うズームで読み直す**。読み方がずれていると、
+    // その差のぶんだけカメラが浮く（＝頭が上がる）。1度解いてから読み直して解き直す。
+    const first = solve(aim.targetAltitudeM);
+    const renderAltitudeM = this.elevationAt(aim.target, Math.floor(first.zoom ?? MAX_ZOOM));
+    const options = renderAltitudeM === aim.targetAltitudeM ? first : solve(renderAltitudeM);
+    if (this.sameAsCurrent(options)) return;
+    this.map.jumpTo(options);
+    // 中心の標高は次の描画まで更新されない。放っておくと1フレームだけ頭が上下するので、
+    // ここで狙い先の標高に合わせておく（描画時に同じ値で上書きされる）。
+    this.map.transform.elevation = renderAltitudeM;
+    // MapLibreには「カメラが地形に潜ったら持ち上げる」保護がある。誤検知で視点を
+    // 書き換えられたら次のフレームで解き直す。
+    if (Math.abs(this.map.getPitch() - (options.pitch ?? 0)) > 0.5 && this.rewrites < 4) {
+      this.rewrites += 1;
+      this.settleBudget = SETTLE_APPLIES;
+      this.schedule();
     }
   }
 
@@ -334,19 +360,17 @@ export class Terrain3D {
       this.flash('ルートの端です');
       return;
     }
-    this.alongM = next;
-    this.afterWalk();
+    this.moveAlong(next);
   }
 
   /** 出発地点（＝出題地点）へ戻る。 */
   returnToStart(): void {
-    if (!this.walkableRoute() || Math.abs(this.alongM - this.startAlongM) < 0.01) return;
-    this.alongM = this.startAlongM;
-    this.afterWalk();
+    if (!this.walkableRoute()) return;
+    this.moveAlong(this.startAlongM);
   }
 
   /** ルートの上をタップして移動する。ルートから遠いタップは無視する。 */
-  private walkTo(p: LatLng): void {
+  private walkToPoint(p: LatLng): void {
     const route = this.walkableRoute();
     if (!route) return;
     const anchor = route.anchorFor(p);
@@ -354,12 +378,50 @@ export class Terrain3D {
       this.flash('ルート（朱線）の上をタップすると移動できます');
       return;
     }
-    this.alongM = anchor.alongM;
-    this.afterWalk();
+    this.moveAlong(anchor.alongM);
+  }
+
+  /**
+   * ルート上を滑らかに歩く。
+   *
+   * **瞬間移動にしない。** 一人称では景色が急に差し替わると、動いたのか
+   * 別の場所に飛ばされたのか分からない。歩く距離に応じた時間をかけて詰める。
+   */
+  private moveAlong(target: number): void {
+    const route = this.walkableRoute();
+    if (!route) return;
+    const from = this.alongM;
+    const to = Math.max(0, Math.min(route.totalM, target));
+    const distance = Math.abs(to - from);
+    if (distance < 0.01) return;
+    this.cancelWalkAnimation();
+    this.restartSettle();
+
+    // 動きを減らす設定の人には出さない（設定を尊重する。DESIGN.md）
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      this.alongM = to;
+      this.afterWalk();
+      return;
+    }
+
+    const duration = Math.max(WALK_MIN_MS, Math.min(WALK_MAX_MS, distance * WALK_MS_PER_M));
+    const startedAt = performance.now();
+    const step = (): void => {
+      const progress = Math.min(1, (performance.now() - startedAt) / duration);
+      this.alongM = from + (to - from) * easeInOut(progress);
+      this.afterWalk();
+      this.walkFrame = progress < 1 ? window.requestAnimationFrame(step) : null;
+    };
+    this.walkFrame = window.requestAnimationFrame(step);
+  }
+
+  private cancelWalkAnimation(): void {
+    if (this.walkFrame === null) return;
+    window.cancelAnimationFrame(this.walkFrame);
+    this.walkFrame = null;
   }
 
   private afterWalk(): void {
-    this.restartSettle();
     this.updateStartMarker();
     this.schedule();
     this.onWalk?.(this.walkState());
@@ -433,7 +495,7 @@ export class Terrain3D {
   private tap(e: PointerEvent): void {
     const rect = this.map.getCanvas().getBoundingClientRect();
     const lngLat = this.map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
-    this.walkTo({ lat: lngLat.lat, lon: lngLat.lng });
+    this.walkToPoint({ lat: lngLat.lat, lon: lngLat.lng });
   }
 
   private bindKeys(canvas: HTMLCanvasElement): void {
@@ -522,7 +584,14 @@ export class Terrain3D {
     });
   }
 
-  /** 出発地点の印。歩いて離れたときだけ出す（足元にあるうちは邪魔なので出さない）。 */
+  /**
+   * 出題地点の印。
+   *
+   * 地面には輪を描き、離れたら遠くからでも分かるようにピンを立てる。
+   * **答えの座標そのものだが、プレイヤーは自分がそこから歩き出したことを知っている**
+   * ので隠す意味は無い（ストリートビューで開始地点が分かるのと同じ）。
+   * 足元に立っている間はピンが視界を塞ぐだけなので出さない。
+   */
   private addStartMarker(): void {
     const feature: GeoJSON.Feature = {
       type: 'Feature',
@@ -565,11 +634,31 @@ export class Terrain3D {
     this.updateStartMarker();
   }
 
-  private updateStartMarker(): void {
-    const visible = this.movedM() >= START_MARKER_AFTER_M ? 'visible' : 'none';
-    for (const id of [LAYER_START, LAYER_START_RING]) {
-      if (this.map.getLayer(id)) this.map.setLayoutProperty(id, 'visibility', visible);
+  /** 遠くからでも見える出題地点のピン。地形に沿って置かれ、尾根の裏では薄くなる。 */
+  private ensureStartPin(): void {
+    if (this.startPin) {
+      this.startPin.setLngLat([this.start.lon, this.start.lat]);
+      return;
     }
+    const element = document.createElement('div');
+    element.className = 'terrain-pin';
+    const dot = document.createElement('span');
+    dot.className = 'terrain-pin__dot';
+    const label = document.createElement('span');
+    label.className = 'terrain-pin__label';
+    label.textContent = '出題地点';
+    element.append(label, dot);
+    this.startPin = new maplibregl.Marker({ element, anchor: 'bottom' })
+      .setLngLat([this.start.lon, this.start.lat])
+      .addTo(this.map);
+  }
+
+  private updateStartMarker(): void {
+    this.ensureStartPin();
+    // 立っている場所からの直線距離で出し入れする（足元では邪魔になるだけ）
+    const away = distanceMeters(this.eye(), this.start);
+    const pin = this.startPin?.getElement();
+    if (pin) pin.style.display = away >= START_PIN_AFTER_M ? '' : 'none';
   }
 
   // -------------------------------------------------------------------------
@@ -643,6 +732,8 @@ export class Terrain3D {
 
   destroy(): void {
     if (this.frame !== null) window.cancelAnimationFrame(this.frame);
+    this.cancelWalkAnimation();
+    this.startPin?.remove();
     if (this.noteTimer !== null) window.clearTimeout(this.noteTimer);
     this.hud.remove();
     this.map.remove();
