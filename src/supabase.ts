@@ -187,7 +187,13 @@ export async function signUpWithEmail(
 ): Promise<AuthOutcome> {
   if (!client) return NOT_CONFIGURED;
   try {
-    const { data, error } = await client.auth.signUp({ email: email.trim(), password });
+    const { data, error } = await client.auth.signUp({
+      email: email.trim(),
+      password,
+      // ニックネームをuser_metadataに預ける。確認メール待ちになると`players`を
+      // 作れないまま画面を離れるので、ここに残しておかないと入力が捨てられる
+      options: { data: { nickname: name.trim().slice(0, NICKNAME_MAX) } },
+    });
     if (error) return { ok: false, pending: false, message: describeAuthError(error.message) };
     if (!data.session || !data.user) {
       return {
@@ -244,13 +250,23 @@ function fallbackNickname(email?: string | undefined): string {
 }
 
 /**
- * `players` の行を用意する。既に登録済みならそのニックネームを使い、
- * 無ければメールアドレスのローカル部から作る。
+ * `players` の行を用意する。優先順位は
+ * **サーバ保存済み → 登録時に入力したニックネーム → メールの@より前**。
+ *
+ * 真ん中があるのは、確認メール待ちで登録が中断した場合に備えるため。
+ * その経路では`players`を作れないまま画面を離れるので、あとからログインした
+ * ときに`user_metadata`から拾い直す。
  */
-async function ensurePlayerRow(user: { id: string; email?: string | undefined }): Promise<void> {
+async function ensurePlayerRow(user: {
+  id: string;
+  email?: string | undefined;
+  user_metadata?: Record<string, unknown> | undefined;
+}): Promise<void> {
   const stored = await syncNickname();
   if (stored) return;
-  await saveNickname(fallbackNickname(user.email));
+  const fromSignUp = user.user_metadata?.nickname;
+  const typed = typeof fromSignUp === 'string' ? fromSignUp.trim() : '';
+  await saveNickname(typed || fallbackNickname(user.email));
 }
 
 /** ニックネームを保存する。ローカルには必ず、Supabaseには繋がれば。 */
