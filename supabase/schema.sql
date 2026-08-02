@@ -3,7 +3,7 @@
 -- Supabase の SQL Editor でそのまま実行する。
 
 -- ---------------------------------------------------------------------------
--- players: 匿名認証したプレイヤーとニックネーム
+-- players: ログイン済みプレイヤー（メールアドレス＋パスワード）とニックネーム
 -- ---------------------------------------------------------------------------
 create table if not exists public.players (
   id          uuid primary key references auth.users (id) on delete cascade,
@@ -63,8 +63,14 @@ create policy scores_insert_self on public.scores
 -- リーダーボード用ビュー
 --   challenge10  : 生スコア降順
 --   complete_all : 達成率（points / (5000 * point_count)）降順
+--
+-- `security_invoker = true` は必須。付けないとビューは作成者（postgres）の権限で
+-- 動き、下のRLSポリシーを素通りする（Supabaseのlinterが security_definer_view を
+-- ERRORで出す）。今は両テーブルとも select が全員可なので実害は無いが、
+-- 将来ポリシーを絞ったときに黙って漏れる形になるため、最初から invoker で固定する。
 -- ---------------------------------------------------------------------------
-create or replace view public.leaderboard as
+create or replace view public.leaderboard
+with (security_invoker = true) as
 select
   s.id,
   s.mode,

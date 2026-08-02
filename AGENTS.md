@@ -16,7 +16,7 @@
 | フロントエンド | Vite + TypeScript（バニラ、フレームワーク無し）+ MapLibre GL JS **v5** |
 | 3D地形 | MapLibre GL Terrain（国土地理院DEM。標高タイルは`addProtocol`で自前変換、外部ライブラリ無し）。一人称は`centerClampedToGround: false`＋`pitch>90`（v5必須） |
 | 前処理 | Python 3.11（`pipeline/`、ffmpeg依存） |
-| DB | Supabase（Postgres／Googleログイン＋スコアのみ。クイズデータはDB不使用） |
+| DB | Supabase（Postgres／メールログイン＋スコアのみ。クイズデータはDB不使用） |
 | Deploy | GitHub Pages + GitHub Actions |
 
 ## Commands
@@ -68,6 +68,13 @@ python pipeline/build_quiz_data.py \
 ```bash
 python pipeline/tests/make_fixture.py Source/DJI_xxx.MP4 -n 120
 ```
+
+## Supabase MCP
+[.mcp.json](.mcp.json)にSupabase公式のホスト版MCPサーバ（HTTP + OAuth・`project_ref`で固定）を設定してある。DBスキーマやログを調べたいときは`list_tables` / `execute_sql` / `get_logs` / `get_advisors`を使う。初回は通常のターミナルで`/mcp`から認証が必要（未認証ならツールが使えないだけで他の作業には影響しない）。詳細は[docs/operations.md](docs/operations.md)。
+
+**スキーマ変更はMCPから直接流し込まず、`supabase/schema.sql`を直してからダッシュボードで実行する**（DBの正が常にリポジトリ側に残るようにするため）。
+
+Supabase公式のAgent Skills（`supabase` / `supabase-postgres-best-practices`）も導入済み。実体はコミットせず[skills-lock.json](skills-lock.json)から`npx skills experimental_install`で復元する。
 
 ## Verification Loop（検証ループ）
 **機能を実装したら、完了宣言の前に必ず回す。** 最重要の規約。

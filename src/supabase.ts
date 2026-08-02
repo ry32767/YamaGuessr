@@ -1,15 +1,35 @@
 /**
- * Supabase（機能K：匿名認証・ニックネーム / 機能L：リーダーボード）。
+ * Supabase（機能K：メールログイン・ニックネーム / 機能L：リーダーボード）。
  *
  * **Supabaseに繋がらなくてもゲーム本体は最後まで動く**（docs/spec.md 機能K）。
  * このモジュールは失敗しても例外を投げっぱなしにせず、呼び出し側が
  * 「リーダーボードだけ無効」に落とせる形で結果を返す。
+ *
+ * 認証は**メールアドレス＋パスワード**。外部プロバイダへ遷移しないので
+ * リダイレクトURLの登録が要らず、ローカルでもGitHub Pagesでも同じ経路で動く。
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { loadSettings, saveSettings } from './storage';
 import type { GameMode, ViewMode } from './types';
 
 export const NICKNAME_MAX = 20;
+
+/** Supabaseの既定の最小パスワード長。ここを変えるならダッシュボード側も変える。 */
+export const PASSWORD_MIN = 6;
+
+/** 認証操作の結果。例外は投げず、必ずこの形で返す。 */
+export interface AuthOutcome {
+  /** サインイン済みになったか */
+  ok: boolean;
+  /**
+   * 確認メール待ちか。
+   * ダッシュボードで「Confirm email」がONのとき、登録直後はセッションが返らない。
+   * OFF運用が既定だが、ONに戻されても画面が黙り込まないようにここで区別する。
+   */
+  pending: boolean;
+  /** 画面に出す日本語メッセージ。成功時はnull */
+  message: string | null;
+}
 
 export interface ScoreRecord {
   mode: GameMode;
@@ -38,21 +58,10 @@ if (url && anonKey) {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      // Googleから戻ってきたURLに乗っているトークンを拾ってセッションにする
-      detectSessionInUrl: true,
+      // 外部プロバイダへ飛ばさないので、URLからトークンを拾う必要が無い
+      detectSessionInUrl: false,
     },
   });
-}
-
-/**
- * ログイン後に戻ってくるURL。
- *
- * GitHub Pages ではサブパス配信（`/YamaGuessr/`）なので `BASE_URL` を足す。
- * **この値を Supabase の Authentication → URL Configuration の
- * Redirect URLs に登録しておく**（登録が無いとログイン後に弾かれる）。
- */
-function redirectUrl(): string {
-  return `${window.location.origin}${import.meta.env.BASE_URL}`;
 }
 
 /** 環境変数が設定されているか。未設定ならリーダーボードUIごと隠す。 */
@@ -80,7 +89,56 @@ export function validateNickname(value: string): string | null {
 }
 
 /**
- * 保存されたセッションから復帰する（Googleから戻ってきた直後もここで拾う）。
+ * メールアドレスの形式チェック。
+ * 厳密な検証はサーバに任せ、ここは打ち間違いを即座に返すためだけの緩い判定にする。
+ */
+export function validateEmail(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return 'メールアドレスを入力してください';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return 'メールアドレスの形式が正しくありません';
+  return null;
+}
+
+export function validatePassword(value: string): string | null {
+  if (value.length === 0) return 'パスワードを入力してください';
+  if (value.length < PASSWORD_MIN) return `パスワードは${PASSWORD_MIN}文字以上にしてください`;
+  return null;
+}
+
+/**
+ * Supabaseの英語エラーを日本語にする（UI文言は日本語・AGENTS.md）。
+ * 未知のメッセージは原文を添えて返す——黙って潰すと原因が追えなくなるため。
+ */
+export function describeAuthError(raw: string): string {
+  const m = raw.toLowerCase();
+  if (m.includes('invalid login credentials')) return 'メールアドレスかパスワードが違います';
+  // Supabaseは実在しなさそうなドメイン（example.com等）を登録時に弾く
+  if (m.includes('email address') && m.includes('invalid')) {
+    return 'このメールアドレスは使えません。別のアドレスをお試しください';
+  }
+  if (m.includes('already registered') || m.includes('already been registered')) {
+    return 'このメールアドレスは登録済みです。「ログイン」から入ってください';
+  }
+  if (m.includes('email not confirmed')) {
+    return 'メールアドレスの確認が済んでいません。届いた確認メールのリンクを開いてください';
+  }
+  if (m.includes('password should be at least')) {
+    return `パスワードは${PASSWORD_MIN}文字以上にしてください`;
+  }
+  if (m.includes('signups not allowed') || m.includes('signup is disabled')) {
+    return '新規登録が無効になっています';
+  }
+  if (m.includes('rate limit') || m.includes('too many requests')) {
+    return '試行が多すぎます。しばらく待ってからもう一度お試しください';
+  }
+  if (m.includes('failed to fetch') || m.includes('network')) {
+    return 'ネットワークに繋がりませんでした（ゲームはこのまま遊べます）';
+  }
+  return `ログインできませんでした（${raw}）`;
+}
+
+/**
+ * 保存されたセッションから復帰する。
  *
  * **ログインしていなくてもゲームは最後まで遊べる**（DESIGN.md 不変条件7）。
  * ログインは「記録を残したい人だけが押すもの」で、起動時に強制しない。
@@ -104,40 +162,63 @@ export function isSignedIn(): boolean {
   return playerId !== null;
 }
 
-/**
- * ログインから戻ってきたURLにエラーが乗っていれば取り出す（1回だけ）。
- *
- * Googleプロバイダが未設定のときなどは、**エラーがURLに載って戻ってくる**。
- * 黙って握りつぶすと「押しても何も起きない」ように見えるので、画面に出す。
- */
-export function takeAuthError(): string | null {
-  const fromHash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  const fromQuery = new URLSearchParams(window.location.search);
-  const message =
-    fromHash.get('error_description') ??
-    fromQuery.get('error_description') ??
-    fromHash.get('error') ??
-    fromQuery.get('error');
-  if (!message) return null;
-  // 同じエラーを再読み込みのたびに出さないよう、URLから消しておく
-  window.history.replaceState(null, '', window.location.pathname);
-  return decodeURIComponent(message.replace(/\+/g, ' '));
+const NOT_CONFIGURED: AuthOutcome = {
+  ok: false,
+  pending: false,
+  message: 'ログイン機能が設定されていません',
+};
+
+function failed(e: unknown): AuthOutcome {
+  const raw = e instanceof Error ? e.message : '原因不明のエラー';
+  return { ok: false, pending: false, message: describeAuthError(raw) };
 }
 
 /**
- * Googleでログインする。**この関数を呼ぶとGoogleの画面へ遷移する**（戻り値は返らない）。
- * 戻ってきたときに `restoreSession()` がセッションを拾う。
+ * メールアドレスとパスワードで新規登録する。
+ *
+ * 登録と同時にサインインまで済ませる（ダッシュボードで「Confirm email」をOFFに
+ * している前提）。**ONに戻された場合はセッションが返らない**ので、その場合は
+ * `pending: true` で「確認メールを見てほしい」と伝える。
  */
-export async function signInWithGoogle(): Promise<string | null> {
-  if (!client) return 'ログイン機能が設定されていません';
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  name: string,
+): Promise<AuthOutcome> {
+  if (!client) return NOT_CONFIGURED;
   try {
-    const { error } = await client.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: redirectUrl() },
-    });
-    return error ? error.message : null;
+    const { data, error } = await client.auth.signUp({ email: email.trim(), password });
+    if (error) return { ok: false, pending: false, message: describeAuthError(error.message) };
+    if (!data.session || !data.user) {
+      return {
+        ok: false,
+        pending: true,
+        message: '確認メールを送りました。リンクを開いてから、もう一度ログインしてください',
+      };
+    }
+    playerId = data.user.id;
+    await saveNickname(name.trim() || fallbackNickname(data.user.email));
+    return { ok: true, pending: false, message: null };
   } catch (e) {
-    return e instanceof Error ? e.message : 'ログインを開始できませんでした';
+    return failed(e);
+  }
+}
+
+/** 登録済みのメールアドレスとパスワードでログインする。 */
+export async function signInWithEmail(email: string, password: string): Promise<AuthOutcome> {
+  if (!client) return NOT_CONFIGURED;
+  try {
+    const { data, error } = await client.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (error) return { ok: false, pending: false, message: describeAuthError(error.message) };
+    if (!data.user) return { ok: false, pending: false, message: 'ログインできませんでした' };
+    playerId = data.user.id;
+    await ensurePlayerRow(data.user);
+    return { ok: true, pending: false, message: null };
+  } catch (e) {
+    return failed(e);
   }
 }
 
@@ -153,18 +234,23 @@ export async function signOut(): Promise<void> {
 }
 
 /**
- * `players` の行を用意する。**Googleの表示名を初期ニックネームにする**
- * （リーダーボードに「（名前なし）」が並ばないように）。
+ * ニックネーム未設定時の初期値。**メールアドレスの@より前**を使う。
+ * リーダーボードが「（名前なし）」で埋まらないようにするための保険で、
+ * あとからニックネームダイアログで変更できる。
  */
-async function ensurePlayerRow(user: { id: string; user_metadata?: Record<string, unknown>; email?: string | undefined }): Promise<void> {
+function fallbackNickname(email?: string | undefined): string {
+  const local = email ? email.split('@')[0] : '';
+  return (local || 'プレイヤー').slice(0, NICKNAME_MAX);
+}
+
+/**
+ * `players` の行を用意する。既に登録済みならそのニックネームを使い、
+ * 無ければメールアドレスのローカル部から作る。
+ */
+async function ensurePlayerRow(user: { id: string; email?: string | undefined }): Promise<void> {
   const stored = await syncNickname();
   if (stored) return;
-  const meta = user.user_metadata ?? {};
-  const fromGoogle =
-    (typeof meta.full_name === 'string' && meta.full_name) ||
-    (typeof meta.name === 'string' && meta.name) ||
-    (user.email ? user.email.split('@')[0] : null);
-  await saveNickname((fromGoogle ?? 'プレイヤー').slice(0, NICKNAME_MAX));
+  await saveNickname(fallbackNickname(user.email));
 }
 
 /** ニックネームを保存する。ローカルには必ず、Supabaseには繋がれば。 */

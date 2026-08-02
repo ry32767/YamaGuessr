@@ -124,16 +124,13 @@ class App {
    * 前回のログインが残っていれば復帰する。
    *
    * **ログインは強制しない。** ログインしていなくても全部遊べて、
-   * 記録を残したい人だけが「Googleでログイン」を押す（DESIGN.md 不変条件7）。
+   * 記録を残したい人だけが「ログイン」を押す（DESIGN.md 不変条件7）。
    */
   private async connect(): Promise<void> {
     if (!remote.isConfigured()) return;
-    const authError = remote.takeAuthError();
-    if (authError) toast(`ログインできませんでした（${authError}）`, 'error');
     const id = await remote.restoreSession();
     this.renderChrome();
     if (!id) return;
-    // ログイン直後はURLに戻り値が残ることがあるので、ホームを描き直して整える
     this.showHome();
   }
 
@@ -206,19 +203,23 @@ class App {
   }
 
   /**
-   * 「Googleでログイン」ボタン。押すとGoogleへ飛び、戻ってきたら記録が残せる。
+   * 「ログイン」ボタン。押すとメールアドレスとパスワードのダイアログが出る。
    * ログインしなくてもゲームは全部遊べるので、主アクションにはしない。
    */
   private loginButton(className = 'btn btn--ghost btn--block'): HTMLElement {
-    const button = el('button', { class: className, type: 'button' }, 'Googleでログイン');
-    button.addEventListener('click', () => {
-      button.disabled = true;
-      void remote.signInWithGoogle().then((error) => {
-        if (!error) return;
-        button.disabled = false;
-        toast(`ログインを開始できませんでした（${error}）`, 'error');
-      });
-    });
+    const button = el('button', { class: className, type: 'button' }, 'ログイン');
+    button.addEventListener('click', () => this.askAuth('signin'));
+    return button;
+  }
+
+  /** ホームの「記録を残すには」用。初めての人はこちらから入る。 */
+  private signUpButton(): HTMLElement {
+    const button = el(
+      'button',
+      { class: 'btn btn--ghost btn--block', type: 'button' },
+      'メールアドレスで新規登録',
+    );
+    button.addEventListener('click', () => this.askAuth('signup'));
     return button;
   }
 
@@ -305,9 +306,10 @@ class App {
             el(
               'p',
               { class: 'muted tiny' },
-              'ログインしなくても全部遊べます。Googleでログインすると、' +
+              'ログインしなくても全部遊べます。メールアドレスで登録すると、' +
                 'スコアがリーダーボードに載り、ニックネームを付けられます。',
             ),
+            this.signUpButton(),
             this.loginButton(),
           ),
         );
@@ -734,6 +736,178 @@ class App {
         ),
       );
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // ログイン（メールアドレス＋パスワード）
+  // -------------------------------------------------------------------------
+  /**
+   * ログイン／新規登録のダイアログ。
+   *
+   * 外部プロバイダへ遷移しないので、押した場所で完結する。タブを切り替えると
+   * 作り直す（画面は「作って差し替える」だけ・このファイル冒頭の方針）。
+   */
+  private askAuth(tab: 'signin' | 'signup'): void {
+    const isSignUp = tab === 'signup';
+    const dialog = el('dialog', { class: 'modal' }) as HTMLDialogElement;
+
+    const email = el('input', {
+      class: 'input',
+      type: 'email',
+      id: 'yg-email',
+      autocomplete: 'email',
+      inputmode: 'email',
+    }) as HTMLInputElement;
+    const password = el('input', {
+      class: 'input',
+      type: 'password',
+      id: 'yg-password',
+      autocomplete: isSignUp ? 'new-password' : 'current-password',
+    }) as HTMLInputElement;
+    const name = el('input', {
+      class: 'input',
+      type: 'text',
+      id: 'yg-signup-nickname',
+      maxlength: remote.NICKNAME_MAX,
+      autocomplete: 'nickname',
+    }) as HTMLInputElement;
+
+    const error = el('p', { class: 'field__error', role: 'alert' });
+    error.hidden = true;
+    const showError = (message: string): void => {
+      error.textContent = message;
+      error.hidden = false;
+    };
+
+    // タブは既存のリーダーボードと同じ見た目・同じロールを使う
+    const tabs = el('div', { class: 'tabs', role: 'tablist' });
+    for (const t of [
+      { key: 'signin' as const, label: 'ログイン' },
+      { key: 'signup' as const, label: '新規登録' },
+    ]) {
+      const button = el(
+        'button',
+        {
+          class: 'tab',
+          type: 'button',
+          role: 'tab',
+          'aria-selected': String(t.key === tab),
+        },
+        t.label,
+      );
+      button.addEventListener('click', () => {
+        if (t.key === tab) return;
+        dialog.close();
+        // closeイベントは非同期に飛ぶので、ここで確実に外す。
+        // 残したまま次を開くと id が一瞬重複し、label の紐付け先がぶれる
+        dialog.remove();
+        this.askAuth(t.key);
+      });
+      append(tabs, button);
+    }
+
+    const submit = el(
+      'button',
+      { class: 'btn btn--primary', type: 'submit', value: 'ok' },
+      isSignUp ? '登録してはじめる' : 'ログイン',
+    ) as HTMLButtonElement;
+    const cancel = el('button', { class: 'btn btn--ghost', type: 'button' }, 'あとで');
+    cancel.addEventListener('click', () => dialog.close());
+
+    const fields = el(
+      'div',
+      { class: 'stack' },
+      el(
+        'div',
+        { class: 'field' },
+        el('label', { class: 'field__label', for: 'yg-email' }, 'メールアドレス'),
+        email,
+      ),
+      el(
+        'div',
+        { class: 'field' },
+        el(
+          'label',
+          { class: 'field__label', for: 'yg-password' },
+          `パスワード（${remote.PASSWORD_MIN}文字以上）`,
+        ),
+        password,
+      ),
+    );
+    if (isSignUp) {
+      append(
+        fields,
+        el(
+          'div',
+          { class: 'field' },
+          el(
+            'label',
+            { class: 'field__label', for: 'yg-signup-nickname' },
+            `ニックネーム（${remote.NICKNAME_MAX}文字まで・あとから変更できます）`,
+          ),
+          name,
+        ),
+      );
+    }
+
+    const form = el(
+      'form',
+      // novalidate：`type="email"` のネイティブ検証を止める。付けないとブラウザ既定の
+      // 英語メッセージが先に出て、こちらの日本語メッセージが表示されない
+      { method: 'dialog', class: 'stack', novalidate: true },
+      el('h2', {}, isSignUp ? '新規登録' : 'ログイン'),
+      el(
+        'p',
+        { class: 'muted tiny' },
+        isSignUp
+          ? 'メールアドレスは記録を引き継ぐためのIDとしてだけ使います。リーダーボードに出るのはニックネームだけです。'
+          : 'ログインすると、機種を変えても同じ記録を引き継げます。',
+      ),
+      tabs,
+      fields,
+      error,
+      el('div', { class: 'row' }, submit, cancel),
+    );
+
+    append(dialog, form);
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    email.focus();
+
+    form.addEventListener('submit', (event) => {
+      // 送信の可否を自前で決めるので、いったん既定の «閉じる» を止める
+      event.preventDefault();
+      const message =
+        remote.validateEmail(email.value) ??
+        remote.validatePassword(password.value) ??
+        (isSignUp ? remote.validateNickname(name.value) : null);
+      if (message) {
+        showError(message);
+        return;
+      }
+      submit.disabled = true;
+      error.hidden = true;
+      const run = isSignUp
+        ? remote.signUpWithEmail(email.value, password.value, name.value)
+        : remote.signInWithEmail(email.value, password.value);
+      void run.then((outcome) => {
+        if (outcome.ok) {
+          dialog.close();
+          toast(`ログインしました（${remote.nickname()}）`, 'info');
+          this.showHome();
+          return;
+        }
+        submit.disabled = false;
+        // 確認メール待ちは失敗ではないので、閉じたうえで案内だけ出す
+        if (outcome.pending) {
+          dialog.close();
+          toast(outcome.message ?? '確認メールを送りました', 'info');
+          return;
+        }
+        showError(outcome.message ?? 'ログインできませんでした');
+      });
+    });
+    dialog.addEventListener('close', () => dialog.remove());
   }
 
   // -------------------------------------------------------------------------

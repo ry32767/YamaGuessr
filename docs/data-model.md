@@ -129,6 +129,14 @@ anon keyは公開されるため、DB側で点数の物理的上限を縛る。�
 - `players` / `scores` ともにRLS有効化
 - **書き込み**：`player_id = auth.uid()` の行のみ許可
 - **読み取り**：全員可（リーダーボード表示用。ニックネームとスコアのみで個人情報を含まない）
+- **`scores`にupdate/deleteポリシーを作らない**＝出したスコアは誰にも書き換え・削除できない（ポリシーが無い操作はRLSが黙って0件にする）
+
+### `leaderboard`ビュー
+`scores` と `players` を結合し、達成率 `points / (5000 * point_count)` を計算して返す読み取り専用ビュー。フロントはランキング取得をこのビューだけから行う。
+
+- **`player_id` を含めない**（誰のスコアかを公開しないため）。フロントは自分のスコアIDを別に引いて突き合わせ、自分の行に印を付ける
+- **`with (security_invoker = true)` を必ず付ける**。付けないとビューは作成者権限で動いて上のRLSを素通りし、Supabaseのlinterが `security_definer_view` をERRORで報告する
+- 結合ビューなので自動更新可能ではなく、ビュー経由のinsert/update/deleteはPostgres側で拒否される
 
 ### リーダーボードのクエリ方針
 - `challenge10`：`points` 降順（常に10問=満点50000で比較可能）

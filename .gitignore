@@ -8,6 +8,13 @@ dist/
 .env.local
 .env.*.local
 
+# Claude Codeのローカル設定（マシン固有・鍵を書く場合があるのでコミットしない）
+.claude/settings.local.json
+
+# Agent Skills の実体（node_modules と同じ扱い。skills-lock.json から復元する）
+.agents/skills/
+.claude/skills/
+
 # 前処理の入力素材（動画・GPX原本・スマホの写真）
 Source/
 *.gpx
