@@ -56,6 +56,11 @@ export class TerrainModel {
   private groundElevationM: number;
   private ready = false;
   private marker: maplibregl.Marker | null = null;
+  /**
+   * 最後にカメラへ渡した地面の高さ [m]（描画空間＝強調込み）。
+   * 標高タイルが遅れて届いて値が変わったら、カメラを入れ直す（`syncGround`）。
+   */
+  private appliedGroundM: number | null = null;
   private dragPointerId: number | null = null;
   private lastX = 0;
   private lastY = 0;
@@ -125,28 +130,62 @@ export class TerrainModel {
     this.map.on('sourcedata', (e) => {
       if (e.sourceId === TERRAIN_SOURCE) this.renderHud();
     });
+    // 標高が届くのは「地点を移したあと」なので、イベントではなく毎フレーム見張る。
+    // sourcedata だけだと、タイルがキャッシュ済みで再取得が起きない場合に取りこぼす
+    this.map.on('render', () => this.syncGround());
     this.renderHud();
   }
 
   // -------------------------------------------------------------------------
   // 操作（中心は動かさない。回り込みと寄り引きだけ）
   // -------------------------------------------------------------------------
-  private orbit(deltaBearing: number, deltaPitch: number): void {
+  /**
+   * カメラを置き直す。**`elevation` を必ず渡す。**
+   *
+   * 渡さないと `centerClampedToGround` 任せになるが、これが当てにならない。
+   * 中心標高が 0 に落ちたまま戻らないことがあり、そうなるとマーカーが
+   * 「海面にあるこの緯度経度」の位置に描かれる——つまり**標高のぶんだけ
+   * ピンが宙に浮く**（氷ノ山の1296m地点で実測506px）。地面の高さは
+   * こちらが知っているので、毎回明示して渡す。
+   */
+  private applyCamera(bearing: number, pitch: number, zoom: number): void {
+    const ground = this.groundElevationRendered();
+    this.appliedGroundM = ground;
     this.map.jumpTo({
       center: [this.center.lon, this.center.lat],
-      bearing: this.map.getBearing() + deltaBearing,
-      pitch: Math.max(MIN_PITCH, Math.min(MAX_PITCH, this.map.getPitch() + deltaPitch)),
-      zoom: this.map.getZoom(),
+      bearing,
+      pitch: Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch)),
+      zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom)),
+      elevation: ground,
     });
   }
 
+  private orbit(deltaBearing: number, deltaPitch: number): void {
+    this.applyCamera(
+      this.map.getBearing() + deltaBearing,
+      this.map.getPitch() + deltaPitch,
+      this.map.getZoom(),
+    );
+  }
+
   private zoomBy(delta: number): void {
-    this.map.jumpTo({
-      center: [this.center.lon, this.center.lat],
-      zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.map.getZoom() + delta)),
-      bearing: this.map.getBearing(),
-      pitch: this.map.getPitch(),
-    });
+    this.applyCamera(this.map.getBearing(), this.map.getPitch(), this.map.getZoom() + delta);
+  }
+
+  /**
+   * 標高タイルが遅れて届いたら、カメラを入れ直して地面に合わせる。
+   *
+   * 地点を移した直後はその場所の標高がまだ分からないので、出題データの値で
+   * 仮に置いておき、実際のタイルが来た時点でここが拾って合わせ直す。
+   * 毎フレーム走るので、変化が無ければ即座に返す。
+   */
+  private syncGround(): void {
+    if (!this.ready) return;
+    const ground = this.groundElevationRendered();
+    // 0.5m未満の揺れは標高タイルの精度の範囲。入れ直すと無駄に描画が走る
+    if (this.appliedGroundM !== null && Math.abs(ground - this.appliedGroundM) < 0.5) return;
+    this.applyCamera(this.map.getBearing(), this.map.getPitch(), this.map.getZoom());
+    this.renderHud();
   }
 
   private bindPointer(canvas: HTMLCanvasElement): void {
@@ -216,12 +255,7 @@ export class TerrainModel {
 
   /** 初期の見え方（北が上・斜め上から）に戻す。 */
   resetView(): void {
-    this.map.jumpTo({
-      center: [this.center.lon, this.center.lat],
-      zoom: START_ZOOM,
-      bearing: 0,
-      pitch: START_PITCH,
-    });
+    this.applyCamera(0, START_PITCH, START_ZOOM);
   }
 
   // -------------------------------------------------------------------------
@@ -252,16 +286,27 @@ export class TerrainModel {
       .addTo(this.map);
   }
 
-  /** 地点の標高 [m]（地形タイルが届いていなければ出題データの値）。 */
-  private elevationM(): number {
+  /**
+   * 中心の地面の高さ [m]、**描画空間の値**（＝実標高×強調度）。
+   *
+   * `map.jumpTo({elevation})` も `getCenterElevation()` も強調込みの値を扱うので、
+   * カメラに渡すのはこちら。地形タイルが届く前は出題データの標高で代用する。
+   */
+  private groundElevationRendered(): number {
     const terrain: MapLibreMap['terrain'] | undefined = this.map.terrain;
-    if (!this.ready || !terrain) return this.groundElevationM;
-    const value = terrain.getElevationForLngLatZoom(
-      new LngLat(this.center.lon, this.center.lat),
-      TERRAIN_QUERY_ZOOM,
-    );
-    if (value === 0 || !Number.isFinite(value)) return this.groundElevationM;
-    return value / TERRAIN_EXAGGERATION;
+    if (this.ready && terrain) {
+      const value = terrain.getElevationForLngLatZoom(
+        new LngLat(this.center.lon, this.center.lat),
+        TERRAIN_QUERY_ZOOM,
+      );
+      if (value !== 0 && Number.isFinite(value)) return value;
+    }
+    return this.groundElevationM * TERRAIN_EXAGGERATION;
+  }
+
+  /** 地点の実標高 [m]。HUDに出す値なので強調は戻す。 */
+  private elevationM(): number {
+    return this.groundElevationRendered() / TERRAIN_EXAGGERATION;
   }
 
   private renderHud(): void {
@@ -292,6 +337,9 @@ export class TerrainModel {
     this.center = center;
     this.groundElevationM = groundElevationM ?? 0;
     if (this.ready) this.addMarker();
+    // 新しい地点の標高はまだ分からない。出題データの値で仮に置き、
+    // 実際の標高タイルが届いた時点で syncGround が合わせ直す
+    this.appliedGroundM = null;
     this.resetView();
     this.renderHud();
   }
